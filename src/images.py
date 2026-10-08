@@ -45,6 +45,23 @@ def _get(path: str, api_key: str, accept: str = "application/json") -> bytes:
         raise RuntimeError(f"Image API error {e.code} on {path}: {detail}") from e
 
 
+def _find_file_chunk(obj) -> str | None:
+    """Recursively find the first tool_file chunk with a file_id."""
+    if isinstance(obj, dict):
+        if obj.get("type") == "tool_file" and obj.get("file_id"):
+            return obj["file_id"]
+        for v in obj.values():
+            found = _find_file_chunk(v)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_file_chunk(item)
+            if found:
+                return found
+    return None
+
+
 def generate_image(prompt: str, out_path: str, model: str | None = None,
                    workdir: Path | None = None) -> str:
     """Generate an image via the Mistral agents image_generation tool.
@@ -86,18 +103,10 @@ def generate_image(prompt: str, out_path: str, model: str | None = None,
         "inputs": prompt,
     }, api_key)
 
-    file_id = None
-    for entry in conv.get("outputs", []):
-        content = entry.get("message", {}).get("content", []) \
-            if isinstance(entry.get("message"), dict) else entry.get("content", [])
-        for chunk in content or []:
-            if chunk.get("type") == "tool_file" and chunk.get("file_type") == "png":
-                file_id = chunk.get("file_id")
-                break
-        if file_id:
-            break
+    file_id = _find_file_chunk(conv)
     if not file_id:
-        raise RuntimeError("No image tool_file in conversation output")
+        raise RuntimeError("No image tool_file in conversation output; "
+                           f"top-level keys: {list(conv)}")
 
     data = _get(f"/files/{file_id}/content", api_key, accept="application/octet-stream")
     Path(out_path).write_bytes(data)

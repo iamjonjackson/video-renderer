@@ -176,24 +176,27 @@ def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
 
 
 def audio_duration(path: str) -> float:
-    """Duration of an audio file in seconds via ffprobe (falls back to bundled ffmpeg)."""
-    probe = _ffprobe_path()
-    out = subprocess.run(
-        [probe, "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", path],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    return float(out)
-
-
-def _ffprobe_path() -> str:
+    """Duration of an audio file in seconds via ffprobe or ffmpeg fallback."""
     from shutil import which
-    p = which("ffprobe")
-    if p:
-        return p
-    import imageio_ffmpeg
-    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-    cand = str(Path(ffmpeg).with_name("ffprobe"))
-    if Path(cand).exists():
-        return cand
-    raise RuntimeError("ffprobe not found; install ffmpeg or imageio-ffmpeg")
+    if which("ffprobe"):
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        return float(out)
+    # No ffprobe: ask ffmpeg to decode and report duration from stderr.
+    ffmpeg = which("ffmpeg")
+    if not ffmpeg:
+        import imageio_ffmpeg
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    proc = subprocess.run(
+        [ffmpeg, "-i", path, "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    import re
+    matches = re.findall(r"time=(\d+):(\d+):(\d+\.\d+)", proc.stderr)
+    if not matches:
+        raise RuntimeError(f"Could not determine duration of {path}")
+    h, m, s = matches[-1]
+    return int(h) * 3600 + int(m) * 60 + float(s)

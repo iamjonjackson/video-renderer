@@ -13,15 +13,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ffmpeg and deps
+      - name: Install Python deps
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
-          pip install moviepy matplotlib imageio-ffmpeg
+          ffmpeg -version | head -1 || true
+          pip install moviepy matplotlib imageio-ffmpeg pillow
 
       - name: Render sample (with voiceover if secret present)
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-          IMAGE_DEBUG: "1"
         run: |
           python3 src/render.py samples/sample-spec.json -o output/sample.mp4
 

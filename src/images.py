@@ -62,6 +62,32 @@ def _find_file_chunk(obj) -> str | None:
     return None
 
 
+def _find_image_url(obj) -> str | None:
+    """Recursively find an image URL in tool.execution info.result strings."""
+    if isinstance(obj, dict):
+        info = obj.get("info")
+        if isinstance(info, dict):
+            result = info.get("result")
+            if isinstance(result, str):
+                try:
+                    parsed = json.loads(result)
+                    url = parsed.get("url") or parsed.get("image_url")
+                    if isinstance(url, str) and url.startswith("http"):
+                        return url
+                except (ValueError, AttributeError):
+                    pass
+        for v in obj.values():
+            found = _find_image_url(v)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_image_url(item)
+            if found:
+                return found
+    return None
+
+
 def generate_image(prompt: str, out_path: str, model: str | None = None,
                    workdir: Path | None = None) -> str:
     """Generate an image via the Mistral agents image_generation tool.
@@ -104,13 +130,20 @@ def generate_image(prompt: str, out_path: str, model: str | None = None,
     }, api_key)
 
     file_id = _find_file_chunk(conv)
-    if not file_id:
-        if os.environ.get("IMAGE_DEBUG"):
-            print(f"[debug] conversation response: {json.dumps(conv)[:2000]}")
-        raise RuntimeError("No image tool_file in conversation output; "
-                           f"top-level keys: {list(conv)}")
-
-    data = _get(f"/files/{file_id}/content", api_key, accept="application/octet-stream")
+    if file_id:
+        data = _get(f"/files/{file_id}/content", api_key,
+                    accept="application/octet-stream")
+    else:
+        url = _find_image_url(conv)
+        if not url:
+            if os.environ.get("IMAGE_DEBUG"):
+                print(f"[debug] conversation response: "
+                      f"{json.dumps(conv)[:2000]}")
+            raise RuntimeError("No image tool_file or image URL in "
+                               f"conversation output; keys: {list(conv)}")
+        req = _rq.Request(url)
+        with _rq.urlopen(req, timeout=300) as r:
+            data = r.read()
     Path(out_path).write_bytes(data)
     return str(out_path)
 

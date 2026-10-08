@@ -107,14 +107,20 @@ def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float
 def centered_text_clip(text: str, theme: dict, size: int, color: str | None = None,
                        x_frac: float = 0.5, y_frac: float = 0.5,
                        max_w_frac: float = 0.85, bold: bool = False) -> TextClip:
-    """Text clip centered at (x_frac, y_frac) of the frame, in pixels."""
+    """Text clip centered at (x_frac, y_frac) of the frame, in pixels.
+
+    Height is derived with headroom (1.6x line box) because caption clips
+    with auto height crop descenders (g/y/p) at the last text row.
+    """
+    line_h = int(size * 1.6)
     clip = TextClip(
         text=text, font_size=size,
         color=color or theme["fg"],
         font=_resolve_font(bold),
         method="caption",
         text_align="center",
-        size=(int(W * max_w_frac), None),
+        vertical_align="center",
+        size=(int(W * max_w_frac), line_h),
     )
     cx, cy = int(W * x_frac), int(H * y_frac)
     pos = (cx - clip.w // 2, cy - clip.h // 2)
@@ -143,14 +149,16 @@ def build_bullets(scene, theme):
                                         color=theme["accent"], y_frac=0.16,
                                         bold=True))
     n = len(scene["items"])
+    b_size = int(theme["font_size"] * 0.55)
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
     for i, item in enumerate(scene["items"]):
         bullet = TextClip(
-            text="• " + item, font_size=int(theme["font_size"] * 0.55),
+            text="• " + item, font_size=b_size,
             color=theme["fg"], font=_resolve_font(),
             method="caption", text_align="left",
-            size=(int(W * 0.7), None),
+            vertical_align="center",
+            size=(int(W * 0.7), int(b_size * 1.6)),
         )
         x = int(W * 0.15)
         y = int(H * (top + i * step))
@@ -273,13 +281,13 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         clip = apply_anim(clip, scene.get("anim", "fade"), dur)
 
         if audio_path:
-            a = AudioFileClip(audio_path).with_start(0)
+            a = AudioFileClip(audio_path).with_start(t_cursor)
             clip = clip.with_audio(a)
 
         video_clips.append(clip)
-        t_cursor += dur
-        print(f"[scene {i}] {stype}: {dur:.2f}s"
+        print(f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
               + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
+        t_cursor += dur
 
     final = concatenate_videoclips(video_clips, method="compose")
 

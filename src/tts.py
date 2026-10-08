@@ -24,10 +24,9 @@ def get_api_key() -> str:
 
 
 FALLBACK_VOICE_SLUGS = [
+    "en_gb_jane_neutral",
+    "gb_jane_neutral",
     "en_jane_neutral",
-    "en_emma_neutral",
-    "en_paul_neutral",
-    "casual_male",
 ]
 
 
@@ -64,6 +63,10 @@ def default_voice() -> str:
                 s = v.get("slug") or v.get("id") or v.get("name")
                 if s:
                     slugs.append(s)
+    for s in slugs:
+        if s.startswith("en_gb") or s.startswith("gb_"):
+            _default_voice_cache = s
+            return s
     for s in slugs:
         if s.startswith("en_"):
             _default_voice_cache = s

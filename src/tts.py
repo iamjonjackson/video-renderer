@@ -23,31 +23,59 @@ def get_api_key() -> str:
     return key
 
 
+FALLBACK_VOICE_SLUGS = [
+    "en_jane_neutral",
+    "en_emma_neutral",
+    "en_paul_neutral",
+    "casual_male",
+]
+
+
 def default_voice() -> str:
-    """Pick a default voice: first en_* built-in slug from /v1/audio/voices."""
+    """Pick a default voice: first en_* slug from /v1/audio/voices."""
     global _default_voice_cache
     if _default_voice_cache:
         return _default_voice_cache
     req = _rq.Request(
-        VOICES_URL + "?limit=200&offset=0",
+        VOICES_URL,
         headers={"Authorization": f"Bearer {get_api_key()}", "Accept": "application/json"},
         method="GET",
     )
-    with _rq.urlopen(req, timeout=60) as resp:
-        body = json.loads(resp.read())
-    voices = body.get("voices") or body.get("data") or body.get("results") or []
-    slugs = [v.get("slug") or v.get("id") or v.get("name") for v in voices]
-    slugs = [s for s in slugs if s]
-    if not slugs:
-        raise RuntimeError(
-            "No voices available from /v1/audio/voices (raw keys: %s)" % list(body)
-        )
+    try:
+        with _rq.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read())
+    except HTTPError as e:
+        detail = e.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"voices list HTTP {e.code}: {detail}") from e
+    voices = None
+    if isinstance(body, list):
+        voices = body
+    elif isinstance(body, dict):
+        for key in ("voices", "data", "results", "items"):
+            if isinstance(body.get(key), list):
+                voices = body[key]
+                break
+    slugs = []
+    if voices is not None:
+        for v in voices:
+            if isinstance(v, str):
+                slugs.append(v)
+            elif isinstance(v, dict):
+                s = v.get("slug") or v.get("id") or v.get("name")
+                if s:
+                    slugs.append(s)
     for s in slugs:
         if s.startswith("en_"):
             _default_voice_cache = s
             return s
-    _default_voice_cache = slugs[0]
-    return slugs[0]
+    if slugs:
+        _default_voice_cache = slugs[0]
+        return slugs[0]
+    print(f"[warn] voices list empty (body keys: "
+          f"{list(body) if isinstance(body, dict) else type(body).__name__}); "
+          f"falling back to {FALLBACK_VOICE_SLUGS[0]}")
+    _default_voice_cache = FALLBACK_VOICE_SLUGS[0]
+    return _default_voice_cache
 
 
 def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,

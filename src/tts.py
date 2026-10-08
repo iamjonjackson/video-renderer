@@ -123,23 +123,24 @@ def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
         body = _speech(base(voice_id, use_id=True))
     else:
         candidates = ([voice_slug] if voice_slug else []) + \
-            ([s for s in FALLBACK_VOICE_SLUGS if not voice_slug or s != voice_slug]
-             if not voice_slug else [])
+            [s for s in FALLBACK_VOICE_SLUGS if s != voice_slug]
         if not candidates:
             candidates = [default_voice()]
         last_err = None
+        body = None
         for slug in candidates:
             try:
                 body = _speech(base(slug))
                 break
             except RuntimeError as e:
-                if "invalid_voice" in str(e) or "Voice" in str(e) or " not found" in str(e):
+                msg = str(e)
+                if "invalid_voice" in msg or "Voice" in msg or " not found" in msg:
                     print(f"[warn] voice '{slug}' rejected, trying next")
                     tried.append(slug)
                     last_err = e
                     continue
                 raise
-        else:
+        if body is None:
             raise RuntimeError(
                 f"No usable voice (tried: {tried}). Last error: {last_err}"
             )

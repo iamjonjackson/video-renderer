@@ -24,8 +24,8 @@ def get_api_key() -> str:
 
 
 FALLBACK_VOICE_SLUGS = [
-    "en_gb_jane_neutral",
     "gb_jane_neutral",
+    "en_gb_jane_neutral",
     "en-GB-jane_neutral",
     "en_jane_neutral",
     "en_emma_neutral",

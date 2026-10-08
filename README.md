@@ -63,6 +63,11 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
 
 - **Scene types**: `title`, `bullets`, `chart` (bar/line/pie), `image`, `outro`
 - **Animations**: `fade`, `slide-up`, `zoom-in`, `kenburns` (images)
+- **PPTX export**: every render also emits a `.pptx` alongside the MP4 —
+  one slide per scene, built from the same artifacts (narration WAVs
+  embedded on their slides, chart PNGs, generated images). Open in
+  PowerPoint, tweak, and export to video from there for a near-identical
+  result.
 - **AI-generated images** (optional, any scene): add an `image` block —
 
 ```json

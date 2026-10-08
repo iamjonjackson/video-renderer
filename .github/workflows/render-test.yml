@@ -16,7 +16,7 @@ jobs:
       - name: Install Python deps
         run: |
           ffmpeg -version | head -1 || true
-          pip install moviepy matplotlib imageio-ffmpeg pillow
+          pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx
 
       - name: Render sample (with voiceover if secret present)
         env:
@@ -28,5 +28,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rendered-sample
-          path: output/sample.mp4
+          path: |
+            output/sample.mp4
+            output/sample.pptx
           retention-days: 14

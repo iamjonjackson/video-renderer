@@ -215,6 +215,44 @@ def build_spotlight_panel(scene, theme, img_path):
     return [border, img], text_x
 
 
+def _left_text_clip(text: str, theme: dict, size: int, color: str | None = None,
+                    bold: bool = False, max_w_px: int | None = None) -> TextClip:
+    """Left-aligned text via auto-sized label clips (true edge alignment).
+
+    Caption clips center content inside their box, so left-aligning the
+    boxes still produces ragged left edges. Label clips auto-size to the
+    text with minimal padding; long text is word-wrapped first.
+    """
+    font = _resolve_font(bold)
+    if max_w_px:
+        text = _wrap_to_width(text, size, font, max_w_px)
+    return TextClip(
+        text=text, font_size=size,
+        color=color or theme["fg"],
+        font=font, method="label", text_align="left",
+        vertical_align="center",
+    )
+
+
+def _wrap_to_width(text: str, size: int, font: str, max_w_px: int,
+                   max_lines: int = 3) -> str:
+    """Word-wrap so each line renders narrower than max_w_px."""
+    from PIL import ImageFont
+    f = ImageFont.truetype(font, size)
+    words = text.split()
+    lines, cur = [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if f.getbbox(trial)[2] <= max_w_px or not cur:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return "\n".join(lines[:max_lines])
+
+
 def build_bullets(scene, theme, workdir=None):
     bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
     clips = [bg]
@@ -229,26 +267,21 @@ def build_bullets(scene, theme, workdir=None):
             clips.extend(panel_clips)
         else:
             clips = composite_bg_image(clips, scene, theme, img_path)
+    max_w = 0.5 if panel_clips else 0.7
+    x = int(W * (text_x_frac - max_w / 2))
     if scene.get("heading"):
-        clips.append(centered_text_clip(scene["heading"], theme,
-                                        int(theme["font_size"] * 0.8),
-                                        color=theme["accent"], y_frac=0.16,
-                                        x_frac=text_x_frac, max_w_frac=0.5,
-                                        bold=True))
+        h_size = int(theme["font_size"] * 0.8)
+        heading = _left_text_clip(scene["heading"], theme, h_size,
+                                  color=theme["accent"], bold=True,
+                                  max_w_px=int(W * max_w))
+        clips.append(heading.with_position((x, int(H * 0.16))))
     n = len(scene["items"])
     b_size = int(theme["font_size"] * 0.55)
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
-    max_w = 0.5 if panel_clips else 0.7
-    x = int(W * (text_x_frac - max_w / 2))
     for i, item in enumerate(scene["items"]):
-        bullet = TextClip(
-            text="• " + item, font_size=b_size,
-            color=theme["fg"], font=_resolve_font(),
-            method="caption", text_align="left",
-            vertical_align="center",
-            size=(int(W * max_w), int(b_size * 1.6)),
-        )
+        bullet = _left_text_clip("• " + item, theme, b_size,
+                                 max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
         clips.append(bullet.with_position((x, y)))
     return CompositeVideoClip(clips, size=(W, H))
@@ -296,14 +329,18 @@ def build_chart(scene, theme, workdir):
         ax.set_title(scene.get("heading", ""), color=theme["fg"],
                      fontsize=28, pad=20)
         ax.grid(axis="y", alpha=0.25, color=theme["fg"])
+    fig.tight_layout(pad=3.5)
     out = workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
-    fig.tight_layout()
     fig.savefig(out, facecolor=theme["bg"])
     plt.close(fig)
-    img = ImageClip(str(out)).resized(height=H)
-    if img.w > W:
-        img = img.resized(width=W)
-    img = img.with_position("center")
+    # Fit inside the frame with a 6% margin on all sides
+    margin = 0.06
+    img = ImageClip(str(out))
+    scale = min(W * (1 - 2 * margin) / img.w, H * (1 - 2 * margin) / img.h)
+    img = img.resized(scale)
+    x = (W - img.w) // 2
+    y = (H - img.h) // 2
+    img = img.with_position((x, y))
     return CompositeVideoClip([img], size=(W, H))
 
 
@@ -344,6 +381,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     workdir.mkdir(parents=True, exist_ok=True)
 
     video_clips, audio_clips = [], []
+    scene_artifacts = []
     t_cursor = 0.0
     for i, scene in enumerate(spec["timeline"]):
         stype = scene["type"]
@@ -371,6 +409,23 @@ def render(spec_path: str, output: str, workdir: str | None = None):
             clip = clip.with_audio(a)
 
         video_clips.append(clip)
+
+        art = {}
+        if audio_path:
+            art["narration_path"] = audio_path
+        img_path = scene_image_clip(scene, theme, workdir) if scene.get("image") else None
+        if stype == "chart":
+            art["chart_png"] = str(workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png")
+        if img_path:
+            if scene.get("image", {}).get("placement", "background") in ("left", "right"):
+                art["image_png"] = img_path
+            else:
+                art["bg_image_png"] = img_path
+                scrim, _ = imggen.scrim_for_contrast(
+                    img_path, theme["fg"], theme["bg"], img_opacity=scene["image"].get("opacity", 0.25))
+                art["scrim"] = scrim
+        scene_artifacts.append(art)
+
         print(f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
               + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
         t_cursor += dur
@@ -392,6 +447,14 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     final.write_videofile(output, fps=fps, codec="libx264",
                           audio_codec="aac", logger=None)
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
+
+    try:
+        import pptx_export
+        pptx_path = str(Path(output).with_suffix(".pptx"))
+        pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
+        print(f"[done] {pptx_path} ({len(scene_artifacts)} slides)")
+    except Exception as e:
+        print(f"[warn] pptx export failed: {e}")
 
 
 if __name__ == "__main__":

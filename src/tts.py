@@ -1,5 +1,6 @@
 import os
 import json
+import os
 import base64
 import subprocess
 from pathlib import Path
@@ -7,6 +8,9 @@ from urllib import request as _rq
 from urllib.error import HTTPError
 
 API_URL = "https://api.mistral.ai/v1/audio/speech"
+VOICES_URL = "https://api.mistral.ai/v1/audio/voices"
+
+_default_voice_cache: str | None = None
 
 
 def get_api_key() -> str:
@@ -19,6 +23,31 @@ def get_api_key() -> str:
     return key
 
 
+def default_voice() -> str:
+    """Pick a default voice: first en_* built-in slug from /v1/audio/voices."""
+    global _default_voice_cache
+    if _default_voice_cache:
+        return _default_voice_cache
+    req = _rq.Request(
+        VOICES_URL,
+        headers={"Authorization": f"Bearer {get_api_key()}", "Accept": "application/json"},
+        method="GET",
+    )
+    with _rq.urlopen(req, timeout=60) as resp:
+        body = json.loads(resp.read())
+    voices = body.get("voices", body if isinstance(body, list) else [])
+    for v in voices:
+        slug = v.get("slug") or v.get("id") or v.get("name", "")
+        if slug.startswith("en_"):
+            _default_voice_cache = slug
+            return slug
+    if voices:
+        slug = (voices[0].get("slug") or voices[0].get("id") or voices[0].get("name"))
+        _default_voice_cache = slug
+        return slug
+    raise RuntimeError("No voices available from /v1/audio/voices")
+
+
 def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
                   voice_id: str | None = None, model: str = "voxtral-mini-tts-2603",
                   fmt: str = "mp3") -> str:
@@ -28,6 +57,8 @@ def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
         payload["voice_id"] = voice_id
     elif voice_slug:
         payload["voice"] = voice_slug
+    else:
+        payload["voice"] = default_voice()
 
     req = _rq.Request(
         API_URL,

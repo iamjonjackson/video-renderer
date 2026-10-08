@@ -2,7 +2,6 @@ import os
 import json
 import os
 import base64
-import subprocess
 from pathlib import Path
 from urllib import request as _rq
 from urllib.error import HTTPError
@@ -176,27 +175,13 @@ def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
 
 
 def audio_duration(path: str) -> float:
-    """Duration of an audio file in seconds via ffprobe or ffmpeg fallback."""
-    from shutil import which
-    if which("ffprobe"):
-        out = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", path],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        return float(out)
-    # No ffprobe: ask ffmpeg to decode and report duration from stderr.
-    ffmpeg = which("ffmpeg")
-    if not ffmpeg:
-        import imageio_ffmpeg
-        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-    proc = subprocess.run(
-        [ffmpeg, "-i", path, "-f", "null", "-"],
-        capture_output=True, text=True,
-    )
-    import re
-    matches = re.findall(r"time=(\d+):(\d+):(\d+\.\d+)", proc.stderr)
-    if not matches:
-        raise RuntimeError(f"Could not determine duration of {path}")
-    h, m, s = matches[-1]
-    return int(h) * 3600 + int(m) * 60 + float(s)
+    """Duration of an audio file as MoviePy will decode/play it.
+
+    Container-level probes (ffprobe/ffmpeg time=) underestimate MP3s by
+    tens of ms versus the decoded stream, clipping the last word of
+    narration. Measuring with AudioFileClip matches the render path
+    exactly.
+    """
+    from moviepy import AudioFileClip
+    with AudioFileClip(path) as clip:
+        return float(clip.duration)

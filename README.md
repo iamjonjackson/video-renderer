@@ -71,7 +71,7 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
   "placement": "background"   // "background" (faded, behind text) or
                                // "left" / "right" (spotlight panel beside text)
   "opacity": 0.25,             // background mode: image fade level
-  "model": "flux-schnell"      // optional image model override
+  "model": "mistral-medium-latest" // optional agent model override
 }
 ```
 

@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import json
 import os
@@ -6,15 +5,53 @@ from pathlib import Path
 from urllib import request as _rq
 from urllib.error import HTTPError
 
-IMAGES_URL = "https://api.mistral.ai/v1/images/generations"
-DEFAULT_IMAGE_MODEL = "flux-schnell"
+BASE_URL = "https://api.mistral.ai/v1"
+DEFAULT_IMAGE_MODEL = "mistral-medium-latest"
+
+
+def _headers(api_key: str, ctype: str = "application/json") -> dict:
+    h = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    if ctype:
+        h["Content-Type"] = ctype
+    return h
+
+
+def _post(path: str, payload: dict, api_key: str) -> dict:
+    req = _rq.Request(
+        BASE_URL + path,
+        data=json.dumps(payload).encode(),
+        headers=_headers(api_key),
+        method="POST",
+    )
+    try:
+        with _rq.urlopen(req, timeout=300) as resp:
+            return json.loads(resp.read())
+    except HTTPError as e:
+        detail = e.read().decode(errors="replace")[:500]
+        raise RuntimeError(f"Image API error {e.code} on {path}: {detail}") from e
+
+
+def _get(path: str, api_key: str, accept: str = "application/json") -> bytes:
+    req = _rq.Request(
+        BASE_URL + path,
+        headers={"Authorization": f"Bearer {api_key}", "Accept": accept},
+        method="GET",
+    )
+    try:
+        with _rq.urlopen(req, timeout=300) as resp:
+            return resp.read()
+    except HTTPError as e:
+        detail = e.read().decode(errors="replace")[:500]
+        raise RuntimeError(f"Image API error {e.code} on {path}: {detail}") from e
 
 
 def generate_image(prompt: str, out_path: str, model: str | None = None,
                    workdir: Path | None = None) -> str:
-    """Generate an image via the Mistral images API; return its path.
+    """Generate an image via the Mistral agents image_generation tool.
 
-    Cached by prompt+model hash in workdir, mirroring narration caching.
+    Flow: create (or reuse cached) image-gen agent, start a conversation
+    with the prompt, download the tool_file via /v1/files. Cached by
+    prompt+model hash in workdir, mirroring narration caching.
     """
     key = hashlib.sha1(f"{prompt}|{model or DEFAULT_IMAGE_MODEL}".encode()).hexdigest()[:12]
     if workdir:
@@ -25,36 +62,44 @@ def generate_image(prompt: str, out_path: str, model: str | None = None,
     if not api_key:
         raise RuntimeError("MISTRAL_API_KEY not set; cannot generate images")
 
-    payload = {"model": model or DEFAULT_IMAGE_MODEL, "prompt": prompt}
-    req = _rq.Request(
-        IMAGES_URL,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with _rq.urlopen(req, timeout=300) as resp:
-            body = json.loads(resp.read())
-    except HTTPError as e:
-        detail = e.read().decode(errors="replace")[:500]
-        raise RuntimeError(f"Image API error {e.code}: {detail}") from e
+    cache_path = Path(workdir or ".") / f"imgagent_{key}.id"
+    agent_id = None
+    if cache_path.exists():
+        agent_id = cache_path.read_text().strip()
 
-    items = body.get("data") or []
-    if not items:
-        raise RuntimeError(f"Unexpected image response keys: {list(body)}")
-    item = items[0]
-    if item.get("b64_json"):
-        data = base64.b64decode(item["b64_json"])
-    elif item.get("url"):
-        with _rq.urlopen(item["url"], timeout=300) as r:
-            data = r.read()
-    else:
-        raise RuntimeError(f"No image data in response item keys: {list(item)}")
+    if not agent_id:
+        agent = _post("/agents", {
+            "model": model or DEFAULT_IMAGE_MODEL,
+            "name": f"video-renderer-img-{key}",
+            "description": "Generates scene images for video-renderer specs.",
+            "instructions": "Generate the requested image directly, no commentary.",
+            "tools": [{"type": "image_generation"}],
+        }, api_key)
+        agent_id = agent.get("id")
+        if not agent_id:
+            raise RuntimeError(f"No agent id in response keys: {list(agent)}")
+        if workdir:
+            cache_path.write_text(agent_id)
 
+    conv = _post("/conversations", {
+        "agent_id": agent_id,
+        "inputs": prompt,
+    }, api_key)
+
+    file_id = None
+    for entry in conv.get("outputs", []):
+        content = entry.get("message", {}).get("content", []) \
+            if isinstance(entry.get("message"), dict) else entry.get("content", [])
+        for chunk in content or []:
+            if chunk.get("type") == "tool_file" and chunk.get("file_type") == "png":
+                file_id = chunk.get("file_id")
+                break
+        if file_id:
+            break
+    if not file_id:
+        raise RuntimeError("No image tool_file in conversation output")
+
+    data = _get(f"/files/{file_id}/content", api_key, accept="application/octet-stream")
     Path(out_path).write_bytes(data)
     return str(out_path)
 

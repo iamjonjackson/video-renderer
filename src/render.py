@@ -426,6 +426,13 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)
         clip = apply_anim(clip, scene.get("anim", "fade"), dur)
+        # Animations like zoom-in resize frames over time even though the
+        # clip's nominal size stays 1920x1080; composite onto the fixed canvas
+        # so encoding always sees constant frame dimensions (variable-size
+        # streams decode as garbage/static in players).
+        if scene.get("anim") in ("zoom-in", "kenburns"):
+            clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
+                .with_duration(dur)
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))

@@ -466,7 +466,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         # make stream copy safe.
         seg_files = sorted(seg_dir.glob("seg_*.mp4"))
         concat_list = seg_dir / "concat.txt"
-        concat_list.write_text("".join("file '" + str(p) + "'\n" for p in seg_files))
+        concat_list.write_text("".join("file '" + str(p.resolve()) + "'\n" for p in seg_files))
         ffmpeg = _ffmpeg_exe()
         cmd = [ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
                "-i", str(concat_list), "-c", "copy", output]

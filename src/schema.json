@@ -78,7 +78,7 @@
         "anim": { "enum": ["fade", "slide-up", "zoom-in"], "default": "fade" },
         "duration": { "type": "number", "description": "Explicit duration in seconds; omit for audio-driven" },
         "narration": { "type": "string", "description": "TTS text; scene auto-sizes to audio length + padding" },
-        "padding": { "type": "number", "default": 0.5, "description": "Extra seconds after narration ends" }
+        "padding": { "type": "number", "default": 1.0, "description": "Extra seconds after narration ends (minimum tail buffer)" }
       },
       "required": ["type", "text"],
       "additionalProperties": false
@@ -92,7 +92,7 @@
         "narration": { "type": "string" },
         "narration_per_bullet": { "type": "array", "items": { "type": "string" }, "description": "One TTS clip per bullet, each bullet reveals as its audio starts" },
         "duration": { "type": "number" },
-        "padding": { "type": "number", "default": 0.5 },
+        "padding": { "type": "number", "default": 1.0 },
         "transition": { "type": "string" }
       },
       "required": ["type", "items"],
@@ -106,7 +106,7 @@
         "anim": { "enum": ["fade", "kenburns"], "default": "fade" },
         "narration": { "type": "string" },
         "duration": { "type": "number" },
-        "padding": { "type": "number", "default": 0.5 },
+        "padding": { "type": "number", "default": 1.0 },
         "transition": { "type": "string" }
       },
       "required": ["type", "src"],
@@ -122,7 +122,7 @@
         "y_label": { "type": "string" },
         "narration": { "type": "string" },
         "duration": { "type": "number" },
-        "padding": { "type": "number", "default": 0.5 },
+        "padding": { "type": "number", "default": 1.0 },
         "transition": { "type": "string" }
       },
       "required": ["type", "labels", "values"],
@@ -134,7 +134,7 @@
         "text": { "type": "string" },
         "narration": { "type": "string" },
         "duration": { "type": "number" },
-        "padding": { "type": "number", "default": 0.8 },
+        "padding": { "type": "number", "default": 1.0 },
         "transition": { "type": "string" }
       },
       "required": ["type", "text"],

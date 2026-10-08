@@ -99,7 +99,7 @@ def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float
     explicit = scene.get("duration")
     if audio_dur > 0:
         # Never cut narration short: explicit duration is a floor, not a cap.
-        audio_driven = audio_dur + scene.get("padding", 0.5)
+        audio_driven = audio_dur + scene.get("padding", 1.0)
         if explicit:
             return max(explicit, audio_driven)
         return audio_driven

@@ -82,7 +82,7 @@ the render continues with a warning (best-effort) — it never aborts.
 `left`/`right` placements keep text on the solid theme background (contrast
 by construction) with the image in a bordered panel.
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
-  `padding` (default 0.5s) adds breathing room after narration.
+  `padding` (default 1.0s) adds a guaranteed tail buffer after narration.
 - **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a
   cloned `voice_id` from a 2–3s audio sample.
 - Full contract: `src/schema.json` (JSON Schema).

@@ -105,7 +105,7 @@ def _speech(payload: dict) -> dict:
 
 def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
                   voice_id: str | None = None, model: str = "voxtral-mini-tts-2603",
-                  fmt: str = "mp3") -> str:
+                  fmt: str = "wav") -> str:
     """Synthesize one narration clip via the Mistral TTS REST API; return its path."""
     payload: dict = {"model": model, "input": text, "response_format": fmt}
     tried = []

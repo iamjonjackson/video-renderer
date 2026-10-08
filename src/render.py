@@ -77,18 +77,18 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
     paths = []
     for i, text in enumerate(texts):
         h = hashlib.sha1(text.encode()).hexdigest()[:10]
-        out = workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'mp3')}"
+        out = workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'wav')}"
         if not out.exists():
             tts.synth_to_file(
                 text, str(out),
                 voice_slug=voice_cfg.get("slug"), voice_id=voice_cfg.get("voice_id"),
                 model=voice_cfg.get("model", "voxtral-mini-tts-2603"),
-                fmt=voice_cfg.get("format", "mp3"),
+                fmt=voice_cfg.get("format", "wav"),
             )
         paths.append(str(out))
     if len(paths) == 1:
         return paths[0], tts.audio_duration(paths[0])
-    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'mp3')}"
+    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
     if not combined.exists():
         merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
         merged.write_audiofile(str(combined), logger=None)

@@ -96,10 +96,15 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
 
 
 def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float:
-    if scene.get("duration"):
-        return scene["duration"]
+    explicit = scene.get("duration")
     if audio_dur > 0:
-        return audio_dur + scene.get("padding", 0.5)
+        # Never cut narration short: explicit duration is a floor, not a cap.
+        audio_driven = audio_dur + scene.get("padding", 0.5)
+        if explicit:
+            return max(explicit, audio_driven)
+        return audio_driven
+    if explicit:
+        return explicit
     if scene.get("type") == "bullets":
         return 1.2 + scene.get("stagger", 0.4) * len(scene.get("items", [])) + 2.0
     return default

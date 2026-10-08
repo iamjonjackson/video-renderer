@@ -106,7 +106,16 @@ See `samples/sample-spec.json` for a complete example.
 
 - TTS is skipped gracefully (with a warning) when `MISTRAL_API_KEY` is unset.
 - Never commit API keys; pass via environment only.
-- TTS pricing: ~$0.016 per 1k characters (Voxtral, `voxtral-mini-tts-2603`).
+
+### Getting a Mistral API key
+
+1. Sign up at [console.mistral.ai](https://console.mistral.ai) — the free
+   "Experiment" tier is enough for prototyping (no credit card required;
+   phone verification is)
+2. Create a key under **API Keys**, copy it into your `.env`:
+   `MISTRAL_API_KEY=...`
+3. Rate limits apply on the free tier — see the **Limits** page in the
+   console for your current allowances
 
 ## Contributing
 

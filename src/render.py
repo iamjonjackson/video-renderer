@@ -27,11 +27,29 @@ import presets
 
 ANIM_IN = 0.6
 SLIDE_DIST = 120
+W, H = 1920, 1080
 
 
 def rgb(hex_color: str) -> tuple:
     h = hex_color.lstrip("#")
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _resolve_font(bold: bool = False) -> str:
+    """Return a TTF path with wide glyph coverage (incl. U+2022 bullet)."""
+    import os
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans%s.ttf" % ("-Bold" if bold else ""),
+        os.path.join(os.path.dirname(matplotlib.__file__),
+                     "mpl-data", "fonts", "ttf",
+                     "DejaVuSans%s.ttf" % ("-Bold" if bold else "")),
+        os.path.join(os.path.dirname(matplotlib.__file__),
+                     "mpl-data", "fonts", "ttf", "DejaVuSans.ttf"),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    raise RuntimeError("No suitable TTF font found; install fonts-dejavu or matplotlib")
 
 
 def load_spec(path: str) -> dict:
@@ -86,67 +104,78 @@ def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float
     return default
 
 
-def text_clip(text: str, theme: dict, size: int, color: str | None = None,
-              center=(0.5, 0.5), bold=False) -> TextClip:
+def centered_text_clip(text: str, theme: dict, size: int, color: str | None = None,
+                       x_frac: float = 0.5, y_frac: float = 0.5,
+                       max_w_frac: float = 0.85, bold: bool = False) -> TextClip:
+    """Text clip centered at (x_frac, y_frac) of the frame, in pixels."""
     clip = TextClip(
         text=text, font_size=size,
         color=color or theme["fg"],
+        font=_resolve_font(bold),
         method="caption",
         text_align="center",
-        size=(int(1920 * 0.85), None),
+        size=(int(W * max_w_frac), None),
     )
-    return clip.with_position((center[0], center[1]), relative=True)
+    cx, cy = int(W * x_frac), int(H * y_frac)
+    pos = (cx - clip.w // 2, cy - clip.h // 2)
+    return clip.with_position(pos)
 
 
 def build_title(scene, theme):
-    bg = ColorClip(size=(1920, 1080), color=rgb(theme["bg"]))
-    title = text_clip(scene["text"], theme, theme["title_font_size"], bold=True,
-                      center=(0.5, 0.42))
+    bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
+    title = centered_text_clip(scene["text"], theme, theme["title_font_size"],
+                               bold=True, y_frac=0.42)
     clips = [bg, title]
     if scene.get("subtitle"):
-        sub = text_clip(scene["subtitle"], theme, int(theme["font_size"] * 0.55),
-                        color=theme["accent"], center=(0.5, 0.58))
+        sub = centered_text_clip(scene["subtitle"], theme,
+                                 int(theme["font_size"] * 0.55),
+                                 color=theme["accent"], y_frac=0.58)
         clips.append(sub)
-    return CompositeVideoClip(clips, size=(1920, 1080))
+    return CompositeVideoClip(clips, size=(W, H))
 
 
 def build_bullets(scene, theme):
-    bg = ColorClip(size=(1920, 1080), color=rgb(theme["bg"]))
+    bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
     clips = [bg]
-    y = 0.25
     if scene.get("heading"):
-        clips.append(text_clip(scene["heading"], theme, int(theme["font_size"] * 0.8),
-                               color=theme["accent"], center=(0.5, 0.16), bold=True))
-    step = min(0.55 / max(len(scene["items"]), 1), 0.18)
-    for item in scene["items"]:
+        clips.append(centered_text_clip(scene["heading"], theme,
+                                        int(theme["font_size"] * 0.8),
+                                        color=theme["accent"], y_frac=0.16,
+                                        bold=True))
+    n = len(scene["items"])
+    top, bottom = 0.30, 0.85
+    step = (bottom - top) / max(n, 1)
+    for i, item in enumerate(scene["items"]):
         bullet = TextClip(
             text="• " + item, font_size=int(theme["font_size"] * 0.55),
-            color=theme["fg"], method="caption", text_align="left",
-            size=(int(1920 * 0.75), None),
+            color=theme["fg"], font=_resolve_font(),
+            method="caption", text_align="left",
+            size=(int(W * 0.7), None),
         )
-        bullet = bullet.with_position(("center", y * 1080))
-        clips.append(bullet)
-        y += step
-    return CompositeVideoClip(clips, size=(1920, 1080))
+        x = int(W * 0.15)
+        y = int(H * (top + i * step))
+        clips.append(bullet.with_position((x, y)))
+    return CompositeVideoClip(clips, size=(W, H))
 
 
 def build_image(scene, theme, workdir):
     src = scene["src"]
     img_clip = ImageClip(src)
-    scale = max(1920 / img_clip.w, 1080 / img_clip.h)
+    scale = max(W / img_clip.w, H / img_clip.h)
     img_clip = img_clip.resized(scale)
-    if img_clip.w > 1920 or img_clip.h > 1080:
+    if img_clip.w > W or img_clip.h > H:
         img_clip = img_clip.cropped(x_center=img_clip.w / 2, y_center=img_clip.h / 2,
-                                     width=1920, height=1080)
+                                     width=W, height=H)
     img_clip = img_clip.with_position("center")
     clips = [img_clip]
     if scene.get("caption"):
-        cap = text_clip(scene["caption"], theme, int(theme["font_size"] * 0.5))
-        cap = cap.with_position(("center", 0.86), relative=True)
-        cap_bg = ColorClip(size=(1920, int(1080 * 0.14)), color=(0, 0, 0)).with_opacity(0.6)
-        cap_bg = cap_bg.with_position(("center", 0.86), relative=True)
+        cap_h = int(H * 0.12)
+        cap = centered_text_clip(scene["caption"], theme,
+                                 int(theme["font_size"] * 0.5), y_frac=0.92)
+        cap_bg = ColorClip(size=(W, cap_h), color=(0, 0, 0)).with_opacity(0.6)
+        cap_bg = cap_bg.with_position((0, H - cap_h))
         clips.extend([cap_bg, cap])
-    return CompositeVideoClip(clips, size=(1920, 1080))
+    return CompositeVideoClip(clips, size=(W, H))
 
 
 def build_chart(scene, theme, workdir):
@@ -175,18 +204,18 @@ def build_chart(scene, theme, workdir):
     fig.tight_layout()
     fig.savefig(out, facecolor=theme["bg"])
     plt.close(fig)
-    img = ImageClip(str(out)).resized(height=1080)
-    if img.w > 1920:
-        img = img.resized(width=1920)
+    img = ImageClip(str(out)).resized(height=H)
+    if img.w > W:
+        img = img.resized(width=W)
     img = img.with_position("center")
-    return CompositeVideoClip([img], size=(1920, 1080))
+    return CompositeVideoClip([img], size=(W, H))
 
 
 def build_outro(scene, theme):
-    bg = ColorClip(size=(1920, 1080), color=rgb(theme["bg"]))
-    txt = text_clip(scene["text"], theme, theme["title_font_size"],
-                    color=theme["accent"], bold=True)
-    return CompositeVideoClip([bg, txt], size=(1920, 1080))
+    bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
+    txt = centered_text_clip(scene["text"], theme, theme["title_font_size"],
+                             color=theme["accent"], bold=True)
+    return CompositeVideoClip([bg, txt], size=(W, H))
 
 
 BUILDERS = {
@@ -203,11 +232,9 @@ def apply_anim(clip, anim: str, duration: float):
         return clip.with_effects([vfx.FadeIn(ANIM_IN), vfx.FadeOut(ANIM_IN)])
     if anim == "slide-up":
         def pos(t):
-            return ("center", 1080 / 2 + min(t / ANIM_IN, 1) * SLIDE_DIST)
+            return ("center", H / 2 + min(t / ANIM_IN, 1) * SLIDE_DIST)
         return clip.with_position(pos).with_effects([vfx.FadeIn(ANIM_IN)])
     if anim == "zoom-in":
-        def zoom(t):
-            return 1.0 + min(t / duration, 1) * 0.06
         return clip.resized(lambda t: 1.0 + min(t / (duration * 0.8), 1) * 0.05) \
                    .with_effects([vfx.FadeIn(ANIM_IN)])
     return clip

@@ -110,49 +110,24 @@ def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float
     return default
 
 
-def _count_wrapped_lines(text: str, size: int, font_path: str, box_w: int) -> int:
-    """Number of lines the text occupies when wrapped into box_w pixels."""
-    from PIL import ImageFont
-    f = ImageFont.truetype(font_path, size)
-    lines = 0
-    for para in text.split("\n"):
-        words = para.split()
-        if not words:
-            lines += 1
-            continue
-        cur = ""
-        for w in words:
-            trial = (cur + " " + w).strip()
-            if f.getbbox(trial)[2] <= box_w or not cur:
-                cur = trial
-            else:
-                lines += 1
-                cur = w
-        lines += 1
-    return max(lines, 1)
-
 
 def centered_text_clip(text: str, theme: dict, size: int, color: str | None = None,
                        x_frac: float = 0.5, y_frac: float = 0.5,
                        max_w_frac: float = 0.85, bold: bool = False) -> TextClip:
-    """Text clip centered at (x_frac, y_frac) of the frame, in pixels.
+    """Text centered at (x_frac, y_frac) of the frame.
 
-    Height is lines * 1.6x line box: caption clips crop descenders
-    (g/y/p) when the box is too short, and a fixed one-line height
-    clips wrapped text. Measure first, then size.
+    Auto height with a generous bottom margin: the box is always taller
+    than the text, so descenders never clip.
     """
-    font = _resolve_font(bold)
-    box_w = int(W * max_w_frac)
-    n_lines = _count_wrapped_lines(text, size, font, box_w)
-    box_h = int(size * 1.6) * n_lines
     clip = TextClip(
         text=text, font_size=size,
         color=color or theme["fg"],
-        font=font,
+        font=_resolve_font(bold),
         method="caption",
         text_align="center",
         vertical_align="center",
-        size=(box_w, box_h),
+        size=(int(W * max_w_frac), None),
+        margin=(15, 8, 15, int(size * 0.45)),
     )
     cx, cy = int(W * x_frac), int(H * y_frac)
     pos = (cx - clip.w // 2, cy - clip.h // 2)
@@ -243,30 +218,17 @@ def build_spotlight_panel(scene, theme, img_path):
 
 def _left_text_clip(text: str, theme: dict, size: int, color: str | None = None,
                     bold: bool = False, max_w_px: int | None = None) -> TextClip:
-    """Left-aligned text with true edge alignment and descender safety.
-
-    Single-line text uses an auto-sized label clip (minimal padding).
-    Multi-line text (after wrapping) uses a caption clip sized to
-    lines * 1.6x, because multi-line label clips crop descenders on the
-    last line.
-    """
+    """Left-aligned text via auto-sized label clips: true edge alignment,
+    with margin keeping the box taller than the text (no descender clipping)."""
     font = _resolve_font(bold)
     if max_w_px:
         text = _wrap_to_width(text, size, font, max_w_px)
-    n_lines = text.count("\n") + 1
-    if n_lines == 1:
-        return TextClip(
-            text=text, font_size=size,
-            color=color or theme["fg"],
-            font=font, method="label", text_align="left",
-            vertical_align="center",
-        )
     return TextClip(
         text=text, font_size=size,
         color=color or theme["fg"],
-        font=font, method="caption", text_align="left",
-        vertical_align="top",
-        size=(max_w_px or int(W * 0.7), int(size * 1.6) * n_lines),
+        font=font, method="label", text_align="left",
+        vertical_align="center",
+        margin=(0, 2, 0, int(size * 0.45)),
     )
 
 

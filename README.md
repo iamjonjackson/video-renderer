@@ -1,8 +1,7 @@
 # video-renderer
 
 Declarative video generation pipeline: describe scenes in a JSON spec, get an
-MP4 with animated visuals, Mistral TTS (Voxtral) voiceover, and optional
-background music.
+MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
 
 ## How it works
 
@@ -14,15 +13,33 @@ background music.
    scene to linger.
 3. MoviePy composites the scenes with animations and encodes the final MP4.
 
-## Quick start
+## Running locally
 
 ```bash
-pip install moviepy matplotlib imageio-ffmpeg
+git clone https://github.com/iamjonjackson/video-renderer.git
+cd video-renderer
+python3 -m venv .venv && source .venv/bin/activate
+pip install moviepy matplotlib imageio-ffmpeg pillow
 
-export MISTRAL_API_KEY=...   # optional; scenes without narration render silent
+cp .env.example .env     # then edit .env and add your MISTRAL_API_KEY
+set -a; source .env; set +a   # load env vars (or use dotenv in your shell)
 
+# Final videos go to ./output, intermediate render files to ./temp
 python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 ```
+
+Notes:
+- `.env` is gitignored; `.env.example` documents the variables.
+- `output/` (final videos) and `temp/` (TTS/image caches, intermediate
+  artifacts) are gitignored except their `.gitkeep` placeholders.
+- Without `MISTRAL_API_KEY`, scenes render silently and AI image blocks are
+  skipped with a warning — the pipeline never hard-fails on missing AI.
+- System ffmpeg is used if installed; otherwise `imageio-ffmpeg` bundles one.
+
+### GitHub Actions
+
+A `Render test` workflow runs on PRs: renders `samples/sample-spec.json`
+using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
 
 ## Spec format (summary)
 
@@ -30,8 +47,7 @@ python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 {
   "meta":  { "fps": 30 },
   "theme": { "preset": "dark", "accent": "#58a6ff" },
-  "voice": { "slug": "en_jane_neutral" },
-  "music": { "src": "assets/music.mp3", "volume": 0.2 },
+  "voice": { "slug": "gb_jane_neutral" },
   "timeline": [
     { "type": "title",  "text": "Quarterly Review", "narration": "..." },
     { "type": "bullets", "heading": "Key Wins", "items": ["...", "..."] },
@@ -45,8 +61,31 @@ python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 
 - **Scene types**: `title`, `bullets`, `chart` (bar/line/pie), `image`, `outro`
 - **Animations**: `fade`, `slide-up`, `zoom-in`, `kenburns` (images)
+- **PPTX export**: every render also emits a `.pptx` alongside the MP4 —
+  one slide per scene, built from the same artifacts (narration WAVs
+  embedded on their slides, chart PNGs, generated images). Open in
+  PowerPoint, tweak, and export to video from there for a near-identical
+  result.
+- **AI-generated images** (optional, any scene): add an `image` block —
+
+```json
+"image": {
+  "prompt": "minimal isometric illustration of a rocket launch, deep blue palette",
+  "placement": "background"   // "background" (faded, behind text) or
+                               // "left" / "right" (spotlight panel beside text)
+  "opacity": 0.25,             // background mode: image fade level
+  "model": "mistral-medium-latest" // optional agent model override
+}
+```
+
+For `background` placement the renderer measures WCAG contrast of the text
+area against the composited backdrop and raises the scrim opacity until
+AA (≥ 4.5:1) is met. If the target can't be reached even at maximum scrim,
+the render continues with a warning (best-effort) — it never aborts.
+`left`/`right` placements keep text on the solid theme background (contrast
+by construction) with the image in a bordered panel.
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
-  `padding` (default 0.5s) adds breathing room after narration.
+  `padding` (default 1.0s) adds a guaranteed tail buffer after narration.
 - **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a
   cloned `voice_id` from a 2–3s audio sample.
 - Full contract: `src/schema.json` (JSON Schema).
@@ -65,4 +104,21 @@ See `samples/sample-spec.json` for a complete example.
 
 - TTS is skipped gracefully (with a warning) when `MISTRAL_API_KEY` is unset.
 - Never commit API keys; pass via environment only.
-- TTS pricing: ~$0.016 per 1k characters (Voxtral, `voxtral-mini-tts-2603`).
+
+### Getting a Mistral API key
+
+1. Sign up at [console.mistral.ai](https://console.mistral.ai) — a free tier
+   is available for prototyping
+2. Create a key under **API Keys**, copy it into your `.env`:
+   `MISTRAL_API_KEY=...`
+3. Rate limits and model availability depend on your tier — see the
+   **Limits** page in the console for your current allowances
+
+## Contributing
+
+1. **Fork** the repo, then clone your fork and branch: `git checkout -b your-feature`
+2. **Pick an open issue** from the [issue tracker](https://github.com/iamjonjackson/video-renderer/issues) and reference it in your PR (`Closes #N`)
+3. **Test locally** — render the sample: `python3 src/render.py samples/sample-spec.json -o output/demo.mp4`
+4. **Open a PR** from your fork's branch, including screenshot/video evidence of the working change (see the issue's acceptance criteria)
+
+> CI runs on PRs but without access to repo secrets, so TTS/image steps are skipped in CI — test locally with your own `MISTRAL_API_KEY` if your change touches them.

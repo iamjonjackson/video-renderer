@@ -1,0 +1,312 @@
+{
+  "meta": {
+    "title": "Crime and Punishment \u2014 stress test",
+    "fps": 30
+  },
+  "theme": {
+    "preset": "dark",
+    "accent": "#c9a227"
+  },
+  "voice": {
+    "slug": "gb_oliver_neutral"
+  },
+  "timeline": [
+    {
+      "type": "title",
+      "text": "Crime and Punishment",
+      "subtitle": "Fyodor Dostoevsky \u2014 a stress test in thirty-odd scenes",
+      "anim": "zoom-in",
+      "narration": "Crime and Punishment, by Fyodor Dostoevsky. A masterpiece of guilt, redemption, and one very bad week in Saint Petersburg. Settle in, this is a long one."
+    },
+    {
+      "type": "bullets",
+      "heading": "Part One \u2014 A Garret in the Heat",
+      "items": [
+        "Raskolnikov: ex-student, penniless, proud",
+        "A coffin-sized garret in the Haymarket",
+        "July heat, no money, one idea"
+      ],
+      "narration": "Meet Rodion Romanovich Raskolnikov. A former student, handsome, clever, and utterly penniless, living in a garret so small he calls it a coffin. It is July in Saint Petersburg, the heat is unbearable, and he has stopped paying his rent. He has also, lately, stopped avoiding a certain idea."
+    },
+    {
+      "type": "bullets",
+      "heading": "The Pawnbroker and the Idea",
+      "items": [
+        "Alyona Ivanovna: old, sharp, rich",
+        "Would her money absolve one death?",
+        "The mathematics of murder"
+      ],
+      "narration": "The idea concerns Alyona Ivanovna, an old pawnbroker who lends money at vicious rates. Raskolnikov overhears that she will be alone one evening. And a theory begins to whisper: could a great man, a Napoleon, step over one worthless life if it bought a thousand good ones? He is horrified by himself. He keeps doing the arithmetic anyway."
+    },
+    {
+      "type": "title",
+      "text": "The Garret",
+      "image": {
+        "prompt": "claustrophobic tiny attic room in 19th century Saint Petersburg, single dirty window, narrow bed like a coffin, oppressive summer heat haze, dark moody 19th century Saint Petersburg, oil painting style, muted palette, dramatic chiaroscuro lighting",
+        "placement": "background",
+        "opacity": 0.3
+      },
+      "narration": "His landlady has stopped sending dinner. His sister and mother are a hundred versts away, saving and sacrificing for him, unaware of what he is becoming. He sleeps for days. He walks the city like a ghost, and the city, hot and stinking and teeming, walks right back through him."
+    },
+    {
+      "type": "bullets",
+      "heading": "The Dream of the Horse",
+      "items": [
+        "A drunken crowd, a beaten mare",
+        "A child weeping: why do they beat her?",
+        "His father carries him away"
+      ],
+      "narration": "He dreams. He is a boy again, walking with his father past a tavern. A drunken mob is beating an old mare to death with bars of iron, laughing as she screams. A little boy throws his arms around the bleeding muzzle and weeps: why do they beat her? His father carries him away. He wakes up with his shirt soaked through, praying, God, show me the path, and I renounce this accursed dream."
+    },
+    {
+      "type": "bullets",
+      "heading": "The Signal",
+      "items": [
+        "Overheard: she will be alone at seven",
+        "The decision: I am going, not thinking",
+        "No turning back"
+      ],
+      "narration": "But the world will not let him renounce it. Passing the Haymarket he overhears that the pawnbroker's sister will be away, and the old woman alone, at seven o'clock tomorrow evening. He does not decide anything. He simply notices, with dread, that his legs have already accepted the plan. Later, sitting on a bench, he says to himself, in horror: Lord, I am going. Not thinking \u2014 I am simply going."
+    },
+    {
+      "type": "chart",
+      "chart_type": "bar",
+      "heading": "Raskolnikov's composure (approximate)",
+      "labels": [
+        "Before the idea",
+        "During the dream",
+        "The eve of the murder",
+        "Walking to her door"
+      ],
+      "values": [
+        80,
+        45,
+        25,
+        8
+      ],
+      "y_label": "Percent remaining",
+      "narration": "On the morning itself, he needs a detail and finds it by accident: an axe in the porter's shed under some canvas. His composure, never robust, is now held together entirely by fever. This chart is, of course, an estimate. But the trend is not contested."
+    },
+    {
+      "type": "bullets",
+      "heading": "The Murder",
+      "items": [
+        "Seven o'clock. The axe under his coat",
+        "Alyona Ivanovna turns her back",
+        "And then: Lizaveta at the door"
+      ],
+      "narration": "He rings at seven exactly. The pawnbroker admits him, suspicious, and turns to fetch the pledge. He takes out the axe. What follows takes less than ninety seconds. He steals nothing of value, fumbles with the locks, and then the door opens: Lizaveta, the meek sister, the harmless one, is standing in the doorway. She will never leave the room either."
+    },
+    {
+      "type": "bullets",
+      "heading": "The Delirium",
+      "items": [
+        "Out of the building, past the crowd",
+        "The axe back under the canvas",
+        "Home. Fever. Am I guilty of a crime?"
+      ],
+      "narration": "He walks out of the building almost casually, past people who were drawn there by a cry. He replaces the axe without being seen. Home in his garret, the fever takes him: rags, wounds, blood everywhere, everything red. For days he is not a murderer but a sick man, muttering, dreaming, hiding the loot under a stone in a courtyard where nobody will ever look."
+    },
+    {
+      "type": "title",
+      "text": "Part Two \u2014 After the Axe",
+      "narration": "The murder is over in minutes. What follows it, is the rest of the novel. Part two."
+    },
+    {
+      "type": "bullets",
+      "heading": "A Police Summons \u2014 Is It the Summons?",
+      "items": [
+        "A note: report to the police office",
+        "It is about his landlady's complaint. Probably.",
+        "He faints"
+      ],
+      "narration": "A note arrives requesting his presence at the police office, and his heart stops. He walks there rehearsing his defence. It is, in fact, about his landlady's unpaid debt, a tedious administrative nothing. But while he is there, the officers chat idly about a certain murder, and Raskolnikov faints dead away. When he comes to, he is certain: they suspect nothing. Nobody is that good an actor. He is."
+    },
+    {
+      "type": "title",
+      "text": "At the Police Office",
+      "image": {
+        "prompt": "crowded smoky 19th century Saint Petersburg police station office, clerks with side whiskers, yellowed papers, oppressive afternoon light, dark moody 19th century Saint Petersburg, oil painting style, muted palette, dramatic chiaroscuro lighting",
+        "placement": "background",
+        "opacity": 0.25
+      },
+      "narration": "The official who signs the papers is a certain Porfiry Petrovich, a specialist in criminal cases, a man who loves psychology almost as much as he loves herrings and cigarettes. He notices the fainting student. He will remember him. This is how it begins: not with an arrest, but with an interest."
+    },
+    {
+      "type": "bullets",
+      "heading": "Marmeladov and the Optional Family",
+      "items": [
+        "Run over in the street: a drunk official",
+        "Sonia: his daughter, self-sacrificed to feed them",
+        "Katerina Ivanovna: consumptive, proud, furious"
+      ],
+      "narration": "On the way home he finds a man dying in the street: Semyon Marmeladov, a drunkard who drank away his family's last kopecks and wept about it every night. Raskolnikov carries him home and meets the family the drunk leaves behind: Katerina Ivanovna, the consumptive stepmother, raging at fate, and Sonia, the quiet daughter who feeds them all with wages from a yellow ticket. He puts his last coins on their window. He has almost none himself."
+    },
+    {
+      "type": "bullets",
+      "heading": "Razumikhin \u2014 The Best Friend in Russian Literature",
+      "items": [
+        "Feeds him, clothes him, finds him work",
+        "Defends him with absolute loyalty",
+        "Nurses him through the fever"
+      ],
+      "narration": "Enter Razumikhin: also a poor student, but built of different material, a man who carries furniture up six flights for pocket change and calls it opportunity. He hauls Raskolnikov out of the fever, dresses him in borrowed trousers, brings the doctor, and defends his friend's oddity to everyone, including himself. On Raskolnikov's worst days, Razumikhin is the argument for humanity."
+    },
+    {
+      "type": "bullets",
+      "heading": "Luzhin \u2014 The Suitor Nobody Ordered",
+      "items": [
+        "Mother and sister arrive in Petersburg",
+        "Luzhin: prosperity with a moustache",
+        "Dunya's choice under pressure"
+      ],
+      "narration": "His mother and his sister Dunya arrive, glowing with the good news: Dunya is engaged. The fianc\u00e9 is Pyotr Petrovich Luzhin, a prosperous lawyer who explains, without embarrassment, that he wants a poor bride, so that she will know she owes him everything. Dunya is agreeing to it to rescue her brother. Raskolnikov, who has murdered two people, will not permit it."
+    },
+    {
+      "type": "bullets",
+      "heading": "Porfiry's Little Game",
+      "items": [
+        "The article: On Crime, printed two months ago",
+        "Extraordinary men are permitted, aren't they?",
+        "Why did you write it, dear sir?"
+      ],
+      "narration": "Raskolnikov visits Porfiry Petrovich, supposedly about the pawned watches, actually about a magazine article Raskolnikov published months earlier: On Crime. In it he argued that certain extraordinary men, Napoleons among them, have a moral right to step over obstacles, including lives, in pursuit of something greater. Porfiry, beaming, sly, and chain-smoking, asks him to elaborate. Would you arrest the man or only the theory, dear sir? The theory, says Raskolnikov, is the man."
+    },
+    {
+      "type": "bullets",
+      "heading": "Luzhin's Just Punishment",
+      "items": [
+        "A party where Luzhin slanders Sonya",
+        "Raskolnikov's mother and sister witness all",
+        "Dunya's new horizon: Razumikhin"
+      ],
+      "narration": "Luzhin makes a scene at a gathering, and Raskolnikov, in front of his own mother, calls him out for what he is. Dunya's eyes are opened and the engagement dies on the floor, leaving the room awkward and Luzhin vindictive. Razumikhin, sensing the moment, proposes he will never stop proposing. Something in the house, at last, begins to recover."
+    },
+    {
+      "type": "title",
+      "text": "Interlude \u2014 The Other Sinner",
+      "narration": "Every idea in this book has a double. Raskolnikov is not the only man in Petersburg who believes himself beyond the law."
+    },
+    {
+      "type": "bullets",
+      "heading": "The Ghost from the Estate",
+      "items": [
+        "Svidrigailov: Dunya's old tormentor, now dead?",
+        "Marooned in Petersburg, rumors swirl",
+        "He says he wants to make amends"
+      ],
+      "narration": "And then, walking out of the blue, Svidrigailov: the man Dunya worked for, the man whose pursuit of her became the scandal that forced her from her last post, the man reported to have poisoned his wife, the man supposed to be dead. He now loungs in cheap inns around Petersburg. He claims to have changed. His interest in Dunya has not changed. Everything about him says the wolf, and nothing in the story is done with him."
+    },
+    {
+      "type": "bullets",
+      "heading": "Sonya Reads Him Lazarus",
+      "items": [
+        "In her room, the New Testament, yellow cover",
+        "He confesses the murder aloud, finally",
+        "Lazarus, come forth"
+      ],
+      "narration": "He finds Sonya in her rented room by the walls, and almost at once he cannot bear to stand in front of her with his terrible, unforgivable secret any longer, and he tells her. She does not scream. She puts her arms around him and weeps for him, and asks, in a voice of utter horror, whether there is no mercy for him. She reads him the raising of Lazarus. He asks her to read it again. He says, finally, that he is a coward, that the old woman was madness, and that he cannot even understand himself."
+    },
+    {
+      "type": "title",
+      "text": "Sonya's Room",
+      "image": {
+        "prompt": "small poor room at dusk, young woman in plain dress reading an old yellow book by candlelight, kneeling man in the shadows, overwhelming tenderness and sorrow, dark moody 19th century Saint Petersburg, oil painting style, muted palette, dramatic chiaroscuro lighting",
+        "placement": "background",
+        "opacity": 0.2
+      },
+      "narration": "Go to the crossroads, she tells him, kiss the earth you have defiled, and then say aloud to the whole world: I have killed. Then God will send you life again. Will you go? Can you? He does not know. But when he leaves her room, he kisses her feet, and she is shocked. He was not bowing to her. He was bowing to the whole of human suffering."
+    },
+    {
+      "type": "title",
+      "text": "Interlude \u2014 The Other Sinner",
+      "narration": "Every idea in this book has a double. Raskolnikov is not the only man in Petersburg who believes himself beyond the law."
+    },
+    {
+      "type": "title",
+      "text": "The Double Life Ends",
+      "narration": "Svidrigailov has heard the confession. Now he must decide what a man does, when he has already stepped over everything."
+    },
+    {
+      "type": "bullets",
+      "heading": "Svidrigailov's Dilemma",
+      "items": [
+        "He overheard the confession",
+        "One door: become Raskolnikov's shadow",
+        "The other: a wall and a revolver"
+      ],
+      "narration": "The walls of the next room were thin. Svidrigailov heard everything, and he uses it, first as a weapon to threaten and then as a strange passport to confess his own dead soul. He dreams of drowning rats and a five-year-old girl who tells him, in eternity, that no one loves him. In the morning he sets his affairs in order, gives his money to orphans and to Sonya, walks to a barracks gate, and shoots himself in front of a firewatch tower."
+    },
+    {
+      "type": "bullets",
+      "heading": "The Confession \u2014 A Public Kind",
+      "items": [
+        "Kneels in the Haymarket square",
+        "Kisses the earth, as she said",
+        "I killed \u2014 but not for greed, not for bread"
+      ],
+      "narration": "On the way to the police station, he remembers her words, and in the middle of the Haymarket he kneels in the mud and kisses the dirty earth. Then he stands up and bows to the whole world, and says: I killed. At police headquarters, Ilya Petrovich looks at him with something like pity. In the cell, the gift Sonya gave him, the cypress cross, is under his pillow."
+    },
+    {
+      "type": "chart",
+      "chart_type": "line",
+      "heading": "Guilt over time (laboratory conditions)",
+      "labels": [
+        "Murder",
+        "Delirium",
+        "With Sonya",
+        "After confession",
+        "Siberia"
+      ],
+      "values": [
+        55,
+        85,
+        95,
+        70,
+        45
+      ],
+      "y_label": "Guilt load",
+      "narration": "The confession does not cure him. That is the whole point. Dostoevsky never pretends that guilt is a pump you drain once. The line goes up, and up, and only begins to bend after Sonya follows him to Siberia and he throws himself at her feet. Guilt, here, is not a bill to be paid. It is a curriculum."
+    },
+    {
+      "type": "title",
+      "text": "Part Five \u2014 The Punishment",
+      "narration": "Confession is not redemption. That, Dostoevsky insists, costs more. The final part."
+    },
+    {
+      "type": "bullets",
+      "heading": "The Trial",
+      "items": [
+        "No premeditation, the court agrees",
+        "Testimony from every heart he touched",
+        "Eight years, second class"
+      ],
+      "narration": "The trial is almost a formality. Witnesses line up to help him: Razumikhin, the Marmeladovs' landlady, even police officers moved by his conduct. The court finds no motive of greed, counts his illness and his good deeds, and sends him to Siberia for eight years. Sonya follows, taking work as a laundress in the settlement by the river."
+    },
+    {
+      "type": "title",
+      "text": "Siberia",
+      "image": {
+        "prompt": "endless frozen siberian landscape, wide grey river, distant wooden stockade, tiny figure walking a straight road into pale morning light, bleak and strangely hopeful, dark moody 19th century Saint Petersburg, oil painting style, muted palette, dramatic chiaroscuro lighting",
+        "placement": "background",
+        "opacity": 0.25
+      },
+      "narration": "And here the novel does something strange and wonderful. The crime story is over. The punishment story is over. And Dostoyevsky, in a short epilogue, hands us the one thing we did not expect: a love story, and the beginning, at last, of a new life."
+    },
+    {
+      "type": "bullets",
+      "heading": "By the River, the Resurrection",
+      "items": [
+        "Siberia: illness, pride, silence",
+        "Sonia's visits across the river",
+        "The moment he falls at her feet"
+      ],
+      "narration": "In prison he is arrogant, feverish, and unrepentant in the way that matters least. Then one morning, the steppe beyond the river shining, Sonya comes to him, and he falls at her feet and weeps, and kisses her feet and tells her he loves her. In that second, the whole story turns green, and everything new begins."
+    },
+    {
+      "type": "outro",
+      "text": "That is the story",
+      "narration": "Seven hundred pages of sin, suffering, and redemption, compressed into one very long video. If you made it this far, you have the patience of Sonya and the constitution of Raskolnikov. This has been a stress test, and you passed."
+    }
+  ]
+}

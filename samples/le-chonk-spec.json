@@ -1,0 +1,54 @@
+{
+  "meta": { "title": "Mistral Le Chonk", "fps": 30 },
+  "theme": { "preset": "dark", "accent": "#ff7733" },
+  "voice": { "slug": "gb_jane_curious" },
+  "timeline": [
+    {
+      "type": "title",
+      "text": "Mistral Le Chonk",
+      "subtitle": "The chunkiest model in the paddock",
+      "anim": "zoom-in",
+      "narration": "Ladies and gentlemen, prepare to meet the absolute unit of AI models. This... is Mistral Le Chonk!"
+    },
+    {
+      "type": "bullets",
+      "heading": "Why is Le Chonk so round?",
+      "items": [
+        "Generous proportions: chunky layers, maximum coziness",
+        "Zero fat trimming: open weights, nothing shaved off",
+        "Hibernation mode: runs efficiently at room temperature"
+      ],
+      "stagger": 0.4,
+      "narration": "Why is Le Chonk so gloriously round? Chunky layers for maximum coziness. Open weights, with absolutely nothing shaved off. And yes, it hibernates! It runs efficiently at room temperature."
+    },
+    {
+      "type": "chart",
+      "chart_type": "bar",
+      "heading": "Chonk density scale (science)",
+      "labels": ["Smol", "Normal", "Chonky", "Le Chonk"],
+      "values": [2, 5, 8, 11],
+      "y_label": "Chonk units",
+      "narration": "Scientists measured it, and the results are in. On the official chonk density scale, Le Chonk doesn't just top the chart. It is the chart. Eleven chonk units, and climbing!"
+    },
+    {
+      "type": "bullets",
+      "heading": "Le Chonk in the wild",
+      "items": [
+        "Naps directly on the GPU — keeps it warm",
+        "Eats tokens in one bite, never crumbs",
+        "Purr-formance mode: activates on head scratches"
+      ],
+      "image": {
+        "prompt": "adorable extremely round fluffy fat orange cat sitting proudly on a computer server like a majestic sphere, soft studio lighting, deep blue background, cute illustration style",
+        "placement": "right",
+        "style": "illustration"
+      },
+      "narration": "Where do you find Le Chonk in the wild? Napping directly on the GPU, keeping it warm and cozy. Eating entire tokens in one bite, never leaving crumbs. And in purr-formance mode, it activates with head scratches!"
+    },
+    {
+      "type": "outro",
+      "text": "Le Chonk approves",
+      "narration": " Le Chonk approved this video. Stay chonky, my friends!"
+    }
+  ]
+}

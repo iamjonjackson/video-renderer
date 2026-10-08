@@ -218,6 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-output/
 __pycache__/
 .render_cache/
+
+# Local env & render artifacts
+.env
+temp/*
+!temp/.gitkeep
+output/*
+!output/.gitkeep

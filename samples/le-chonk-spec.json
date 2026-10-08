@@ -1,7 +1,7 @@
 {
   "meta": { "title": "Mistral Le Chonk", "fps": 30 },
   "theme": { "preset": "dark", "accent": "#ff7733" },
-  "voice": { "slug": "gb_jane_neutral" },
+  "voice": { "slug": "gb_jane_curious" },
   "timeline": [
     {
       "type": "title",
@@ -39,7 +39,7 @@
         "Purr-formance mode: activates on head scratches"
       ],
       "image": {
-        "prompt": "adorable extremely round fluffy fat grey cat sitting proudly like a majestic sphere, soft studio lighting, deep blue background, cute illustration style",
+        "prompt": "adorable extremely round fluffy fat orange cat sitting proudly on a computer server like a majestic sphere, soft studio lighting, deep blue background, cute illustration style",
         "placement": "right",
         "style": "illustration"
       },
@@ -48,7 +48,7 @@
     {
       "type": "outro",
       "text": "Le Chonk approves",
-      "narration": "Stay chonky, my friends. Le Chonk approves."
+      "narration": "Stay chonky, my friends. Le Chonk approved this video."
     }
   ]
 }

@@ -7,6 +7,9 @@ on:
 jobs:
   render:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        spec: [sample-spec, le-chonk-spec]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,20 +18,19 @@ jobs:
 
       - name: Install Python deps
         run: |
-          ffmpeg -version | head -1 || true
           pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx
 
-      - name: Render sample (with voiceover if secret present)
+      - name: Render ${{ matrix.spec }}
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
         run: |
-          python3 src/render.py samples/sample-spec.json -o output/sample.mp4
+          python3 src/render.py samples/${{ matrix.spec }}.json -o output/${{ matrix.spec }}.mp4
 
       - name: Upload rendered video
         uses: actions/upload-artifact@v4
         with:
-          name: rendered-sample
+          name: rendered-${{ matrix.spec }}
           path: |
-            output/sample.mp4
-            output/sample.pptx
+            output/${{ matrix.spec }}.mp4
+            output/${{ matrix.spec }}.pptx
           retention-days: 14

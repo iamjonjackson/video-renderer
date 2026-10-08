@@ -130,6 +130,7 @@ def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
         for slug in candidates:
             try:
                 body = _speech(base(slug))
+                print(f"[voice] using '{slug}'")
                 break
             except RuntimeError as e:
                 msg = str(e)

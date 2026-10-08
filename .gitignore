@@ -218,7 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-output/
 __pycache__/
 .render_cache/
 

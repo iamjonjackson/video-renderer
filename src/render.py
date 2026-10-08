@@ -433,13 +433,6 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     final = concatenate_videoclips(video_clips, method="compose")
 
     audios = [c.audio for c in video_clips if c.audio]
-    if spec.get("music", {}).get("src"):
-        m = spec["music"]
-        music = AudioFileClip(m["src"]).with_volume_scaled(m.get("volume", 0.2))
-        music = music.subclipped(0, min(music.duration, final.duration))
-        music = music.with_effects([vfx.audioFadeIn(m.get("fade_in", 1)),
-                                    vfx.audioFadeOut(m.get("fade_out", 2))])
-        audios.append(music)
     if audios:
         final = final.with_audio(CompositeAudioClip(audios))
 

@@ -38,15 +38,6 @@
         "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3" }
       }
     },
-    "music": {
-      "type": "object",
-      "properties": {
-        "src": { "type": "string", "description": "Path or URL to background music file" },
-        "volume": { "type": "number", "default": 0.2, "minimum": 0, "maximum": 1 },
-        "fade_in": { "type": "number", "default": 1 },
-        "fade_out": { "type": "number", "default": 2 }
-      }
-    },
     "timeline": {
       "type": "array",
       "items": { "$ref": "#/definitions/scene" }

@@ -1,8 +1,7 @@
 # video-renderer
 
 Declarative video generation pipeline: describe scenes in a JSON spec, get an
-MP4 with animated visuals, Mistral TTS (Voxtral) voiceover, and optional
-background music.
+MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
 
 ## How it works
 
@@ -49,7 +48,6 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
   "meta":  { "fps": 30 },
   "theme": { "preset": "dark", "accent": "#58a6ff" },
   "voice": { "slug": "gb_jane_neutral" },
-  "music": { "src": "assets/music.mp3", "volume": 0.2 },
   "timeline": [
     { "type": "title",  "text": "Quarterly Review", "narration": "..." },
     { "type": "bullets", "heading": "Key Wins", "items": ["...", "..."] },

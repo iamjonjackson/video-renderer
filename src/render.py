@@ -22,6 +22,7 @@ from moviepy import (ColorClip, CompositeVideoClip, ImageClip, TextClip,
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "themes"))
+import images as imggen
 import tts
 import presets
 
@@ -127,11 +128,34 @@ def centered_text_clip(text: str, theme: dict, size: int, color: str | None = No
     return clip.with_position(pos)
 
 
-def build_title(scene, theme):
+def scene_image_clip(scene: dict, theme: dict, workdir: Path):
+    """Generate (if needed) and return the scene's AI image path, or None."""
+    img_cfg = scene.get("image")
+    if not img_cfg:
+        return None
+    if not img_cfg.get("prompt"):
+        print("[warn] scene 'image' block missing 'prompt'; skipping")
+        return None
+    out = workdir / f"sceneimg_{hashlib.sha1(json.dumps(img_cfg, sort_keys=True).encode()).hexdigest()[:12]}.png"
+    if not out.exists():
+        try:
+            imggen.generate_image(img_cfg["prompt"], str(out),
+                                   model=img_cfg.get("model"), workdir=workdir)
+        except RuntimeError as e:
+            print(f"[warn] image generation failed ({e}); rendering without image")
+            return None
+    return str(out)
+
+
+def build_title(scene, theme, workdir=None):
     bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
+    clips = [bg]
+    img_path = scene_image_clip(scene, theme, workdir) if workdir else None
+    if img_path:
+        clips = composite_bg_image(clips, scene, theme, img_path)
     title = centered_text_clip(scene["text"], theme, theme["title_font_size"],
                                bold=True, y_frac=0.42)
-    clips = [bg, title]
+    clips.append(title)
     if scene.get("subtitle"):
         sub = centered_text_clip(scene["subtitle"], theme,
                                  int(theme["font_size"] * 0.55),
@@ -140,27 +164,86 @@ def build_title(scene, theme):
     return CompositeVideoClip(clips, size=(W, H))
 
 
-def build_bullets(scene, theme):
+def composite_bg_image(clips, scene, theme, img_path):
+    """Insert a faded background image behind text with best-effort WCAG scrim."""
+    img_cfg = scene["image"]
+    opacity = img_cfg.get("opacity", 0.25)
+    bg_img = ImageClip(img_path)
+    scale = max(W / bg_img.w, H / bg_img.h)
+    bg_img = bg_img.resized(scale)
+    if bg_img.w > W or bg_img.h > H:
+        bg_img = bg_img.cropped(x_center=bg_img.w / 2, y_center=bg_img.h / 2,
+                                width=W, height=H)
+    bg_img = bg_img.with_opacity(opacity).with_position((0, 0))
+    scrim, passes = imggen.scrim_for_contrast(
+        img_path, theme["fg"], theme["bg"],
+        text_area=(0.5, 0.5, 0.7, 0.4),
+        img_opacity=opacity,
+    )
+    if not passes:
+        print(f"[warn] scene background image cannot reach 4.5:1 contrast "
+              f"even at scrim {scrim:.2f}; text may be hard to read")
+    scrim_clip = ColorClip(size=(W, H), color=rgb(theme["bg"])) \
+        .with_opacity(scrim).with_position((0, 0))
+    return [clips[0], bg_img, scrim_clip] + clips[1:]
+
+
+def build_spotlight_panel(scene, theme, img_path):
+    """Rounded image panel on one side; returns (clips_to_add, text_x_frac)."""
+    placement = scene["image"].get("placement", "right")
+    side = placement if placement in ("left", "right") else "right"
+    panel_w = int(W * 0.38)
+    panel_h = int(H * 0.70)
+    x = int(W * 0.56) if side == "right" else int(W * 0.06)
+    y = int(H * 0.15)
+
+    img = ImageClip(img_path)
+    scale = max(panel_w / img.w, panel_h / img.h)
+    img = img.resized(scale)
+    if img.w > panel_w or img.h > panel_h:
+        img = img.cropped(x_center=img.w / 2, y_center=img.h / 2,
+                          width=panel_w, height=panel_h)
+    img = img.with_position((x, y))
+    border = ColorClip(size=(panel_w + 8, panel_h + 8),
+                       color=rgb(theme["accent"])).with_position((x - 4, y - 4))
+    text_x = 0.28 if side == "right" else 0.72
+    return [border, img], text_x
+
+
+def build_bullets(scene, theme, workdir=None):
     bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
     clips = [bg]
+    text_x_frac = 0.5
+    panel_clips = []
+    img_path = scene_image_clip(scene, theme, workdir) if workdir else None
+    if img_path:
+        img_cfg = scene["image"]
+        placement = img_cfg.get("placement", "background")
+        if placement in ("left", "right"):
+            panel_clips, text_x_frac = build_spotlight_panel(scene, theme, img_path)
+            clips.extend(panel_clips)
+        else:
+            clips = composite_bg_image(clips, scene, theme, img_path)
     if scene.get("heading"):
         clips.append(centered_text_clip(scene["heading"], theme,
                                         int(theme["font_size"] * 0.8),
                                         color=theme["accent"], y_frac=0.16,
+                                        x_frac=text_x_frac, max_w_frac=0.5,
                                         bold=True))
     n = len(scene["items"])
     b_size = int(theme["font_size"] * 0.55)
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
+    max_w = 0.5 if panel_clips else 0.7
+    x = int(W * (text_x_frac - max_w / 2))
     for i, item in enumerate(scene["items"]):
         bullet = TextClip(
             text="• " + item, font_size=b_size,
             color=theme["fg"], font=_resolve_font(),
             method="caption", text_align="left",
             vertical_align="center",
-            size=(int(W * 0.7), int(b_size * 1.6)),
+            size=(int(W * max_w), int(b_size * 1.6)),
         )
-        x = int(W * 0.15)
         y = int(H * (top + i * step))
         clips.append(bullet.with_position((x, y)))
     return CompositeVideoClip(clips, size=(W, H))
@@ -260,9 +343,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     for i, scene in enumerate(spec["timeline"]):
         stype = scene["type"]
         builder = BUILDERS[stype]
-        if stype == "image":
-            clip = builder(scene, theme, workdir)
-        elif stype == "chart":
+        if stype in ("image", "chart", "title", "bullets"):
             clip = builder(scene, theme, workdir)
         else:
             clip = builder(scene, theme)

@@ -14,15 +14,33 @@ background music.
    scene to linger.
 3. MoviePy composites the scenes with animations and encodes the final MP4.
 
-## Quick start
+## Running locally
 
 ```bash
-pip install moviepy matplotlib imageio-ffmpeg
+git clone https://github.com/iamjonjackson/video-renderer.git
+cd video-renderer
+python3 -m venv .venv && source .venv/bin/activate
+pip install moviepy matplotlib imageio-ffmpeg pillow
 
-export MISTRAL_API_KEY=...   # optional; scenes without narration render silent
+cp .env.example .env     # then edit .env and add your MISTRAL_API_KEY
+set -a; source .env; set +a   # load env vars (or use dotenv in your shell)
 
+# Final videos go to ./output, intermediate render files to ./temp
 python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 ```
+
+Notes:
+- `.env` is gitignored; `.env.example` documents the variables.
+- `output/` (final videos) and `temp/` (TTS/image caches, intermediate
+  artifacts) are gitignored except their `.gitkeep` placeholders.
+- Without `MISTRAL_API_KEY`, scenes render silently and AI image blocks are
+  skipped with a warning — the pipeline never hard-fails on missing AI.
+- System ffmpeg is used if installed; otherwise `imageio-ffmpeg` bundles one.
+
+### GitHub Actions
+
+A `Render test` workflow runs on PRs: renders `samples/sample-spec.json`
+using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
 
 ## Spec format (summary)
 
@@ -30,7 +48,7 @@ python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 {
   "meta":  { "fps": 30 },
   "theme": { "preset": "dark", "accent": "#58a6ff" },
-  "voice": { "slug": "en_jane_neutral" },
+  "voice": { "slug": "gb_jane_neutral" },
   "music": { "src": "assets/music.mp3", "volume": 0.2 },
   "timeline": [
     { "type": "title",  "text": "Quarterly Review", "narration": "..." },
@@ -45,6 +63,24 @@ python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 
 - **Scene types**: `title`, `bullets`, `chart` (bar/line/pie), `image`, `outro`
 - **Animations**: `fade`, `slide-up`, `zoom-in`, `kenburns` (images)
+- **AI-generated images** (optional, any scene): add an `image` block —
+
+```json
+"image": {
+  "prompt": "minimal isometric illustration of a rocket launch, deep blue palette",
+  "placement": "background"   // "background" (faded, behind text) or
+                               // "left" / "right" (spotlight panel beside text)
+  "opacity": 0.25,             // background mode: image fade level
+  "model": "flux-schnell"      // optional image model override
+}
+```
+
+For `background` placement the renderer measures WCAG contrast of the text
+area against the composited backdrop and raises the scrim opacity until
+AA (≥ 4.5:1) is met. If the target can't be reached even at maximum scrim,
+the render continues with a warning (best-effort) — it never aborts.
+`left`/`right` placements keep text on the solid theme background (contrast
+by construction) with the image in a bordered panel.
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
   `padding` (default 0.5s) adds breathing room after narration.
 - **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a

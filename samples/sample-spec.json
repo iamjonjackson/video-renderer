@@ -48,6 +48,21 @@
       "narration": "Monthly recurring revenue climbed from four hundred ten thousand in July to five hundred twelve thousand in September."
     },
     {
+      "type": "bullets",
+      "heading": "Looking Ahead",
+      "items": [
+        "Product launch in October",
+        "Two new markets",
+        "Hiring in engineering"
+      ],
+      "narration": "Looking ahead, we launch the new product in October, enter two new markets, and continue hiring in engineering.",
+      "image": {
+        "prompt": "minimal isometric illustration of a rocket launch over a city skyline, deep blue palette with coral accents, clean flat vector style",
+        "placement": "right",
+        "style": "isometric"
+      }
+    },
+    {
       "type": "outro",
       "text": "Thank you",
       "duration": 2.5

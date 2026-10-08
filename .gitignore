@@ -221,3 +221,10 @@ __marimo__/
 output/
 __pycache__/
 .render_cache/
+
+# Local env & render artifacts
+.env
+temp/*
+!temp/.gitkeep
+output/*
+!output/.gitkeep

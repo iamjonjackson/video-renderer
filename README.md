@@ -107,3 +107,12 @@ See `samples/sample-spec.json` for a complete example.
 - TTS is skipped gracefully (with a warning) when `MISTRAL_API_KEY` is unset.
 - Never commit API keys; pass via environment only.
 - TTS pricing: ~$0.016 per 1k characters (Voxtral, `voxtral-mini-tts-2603`).
+
+## Contributing
+
+1. **Fork** the repo, then clone your fork and branch: `git checkout -b your-feature`
+2. **Pick an open issue** from the [issue tracker](https://github.com/iamjonjackson/video-renderer/issues) and reference it in your PR (`Closes #N`)
+3. **Test locally** — render the sample: `python3 src/render.py samples/sample-spec.json -o output/demo.mp4`
+4. **Open a PR** from your fork's branch, including screenshot/video evidence of the working change (see the issue's acceptance criteria)
+
+> CI runs on PRs but without access to repo secrets, so TTS/image steps are skipped in CI — test locally with your own `MISTRAL_API_KEY` if your change touches them.

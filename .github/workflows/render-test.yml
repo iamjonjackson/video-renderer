@@ -21,6 +21,7 @@ jobs:
       - name: Render sample (with voiceover if secret present)
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          IMAGE_DEBUG: "1"
         run: |
           python3 src/render.py samples/sample-spec.json -o output/sample.mp4
 

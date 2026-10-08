@@ -105,6 +105,8 @@ def generate_image(prompt: str, out_path: str, model: str | None = None,
 
     file_id = _find_file_chunk(conv)
     if not file_id:
+        if os.environ.get("IMAGE_DEBUG"):
+            print(f"[debug] conversation response: {json.dumps(conv)[:2000]}")
         raise RuntimeError("No image tool_file in conversation output; "
                            f"top-level keys: {list(conv)}")
 

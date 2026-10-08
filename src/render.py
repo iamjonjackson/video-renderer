@@ -17,7 +17,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from moviepy import (ColorClip, CompositeVideoClip, ImageClip, TextClip,
-                     AudioFileClip, CompositeAudioClip, concatenate_videoclips,
+                     VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_videoclips,
                      concatenate_audioclips, vfx)
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -371,6 +371,25 @@ def apply_anim(clip, anim: str, duration: float):
     return clip
 
 
+def _ffmpeg_exe() -> str:
+    from shutil import which
+    p = which("ffmpeg")
+    if p:
+        return p
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def _export_pptx(spec, scene_artifacts, output):
+    try:
+        import pptx_export
+        pptx_path = str(Path(output).with_suffix(".pptx"))
+        pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
+        print(f"[done] {pptx_path} ({len(scene_artifacts)} slides)")
+    except Exception as e:
+        print(f"[warn] pptx export failed: {e}")
+
+
 def render(spec_path: str, output: str, workdir: str | None = None):
     spec = load_spec(spec_path)
     theme = spec["theme"]
@@ -378,9 +397,15 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
 
-    video_clips, audio_clips = [], []
+    video_clips, audios = [], []
     scene_artifacts = []
     t_cursor = 0.0
+    fps = spec["meta"]["fps"]
+    stream = len(spec["timeline"]) > 12
+    seg_dir = workdir / "segments"
+    if stream:
+        seg_dir.mkdir(exist_ok=True)
+        print(f"[stream] long timeline ({len(spec['timeline'])} scenes); rendering per-scene segments")
     for i, scene in enumerate(spec["timeline"]):
         stype = scene["type"]
         builder = BUILDERS[stype]
@@ -403,10 +428,17 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         clip = apply_anim(clip, scene.get("anim", "fade"), dur)
 
         if audio_path:
-            a = AudioFileClip(audio_path).with_start(t_cursor)
-            clip = clip.with_audio(a)
+            audios.append(AudioFileClip(audio_path).with_start(t_cursor))
 
-        video_clips.append(clip)
+        # Bound memory on long timelines: render each scene straight to a
+        # disk segment and release it, instead of holding every composite.
+        if stream:
+            seg = seg_dir / f"seg_{i:03d}.mp4"
+            clip.write_videofile(str(seg), fps, codec="libx264", logger=None)
+            clip.close()
+            del clip
+        else:
+            video_clips.append(clip)
 
         art = {}
         if audio_path:
@@ -428,24 +460,40 @@ def render(spec_path: str, output: str, workdir: str | None = None):
               + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
         t_cursor += dur
 
-    final = concatenate_videoclips(video_clips, method="compose")
+    if stream:
+        # Concatenate segments with the ffmpeg concat demuxer (O(1) memory;
+        # MoviePy re-reading 31 segment files OOMs). Identical codecs/params
+        # make stream copy safe.
+        seg_files = sorted(seg_dir.glob("seg_*.mp4"))
+        concat_list = seg_dir / "concat.txt"
+        concat_list.write_text("".join("file '" + str(p) + "'\n" for p in seg_files))
+        ffmpeg = _ffmpeg_exe()
+        cmd = [ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+               "-i", str(concat_list), "-c", "copy", output]
+        subprocess.run(cmd, check=True)
+        # Mux narration: one pass with all audio offsets as inputs
+        if audios:
+            mixed = workdir / "narration_all.wav"
+            CompositeAudioClip(audios).write_audiofile(str(mixed), logger=None)
+            tmp = str(Path(output).with_suffix(".mux.mp4"))
+            subprocess.run([ffmpeg, "-y", "-loglevel", "error",
+                           "-i", output, "-i", str(mixed),
+                           "-c:v", "copy", "-c:a", "aac",
+                           "-map", "0:v", "-map", "1:a",
+                           "-shortest", tmp], check=True)
+            Path(tmp).replace(output)
+        print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps, streamed)")
+        _export_pptx(spec, scene_artifacts, output)
+        return
 
-    audios = [c.audio for c in video_clips if c.audio]
+    final = concatenate_videoclips(video_clips, method="compose")
     if audios:
         final = final.with_audio(CompositeAudioClip(audios))
-
-    fps = spec["meta"]["fps"]
     final.write_videofile(output, fps=fps, codec="libx264",
                           audio_codec="aac", logger=None)
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
 
-    try:
-        import pptx_export
-        pptx_path = str(Path(output).with_suffix(".pptx"))
-        pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
-        print(f"[done] {pptx_path} ({len(scene_artifacts)} slides)")
-    except Exception as e:
-        print(f"[warn] pptx export failed: {e}")
+    _export_pptx(spec, scene_artifacts, output)
 
 
 if __name__ == "__main__":

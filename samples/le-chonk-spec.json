@@ -28,7 +28,7 @@
       "labels": ["Smol", "Normal", "Chonky", "Le Chonk"],
       "values": [2, 5, 8, 11],
       "y_label": "Chonk units",
-      "narration": "Scientists measured it, and the results are in. On the official chonk density scale, Le Chonk doesn't just top the chart. It IS the chart. Eleven chonk units, and climbing!"
+      "narration": "Scientists measured it, and the results are in. On the official chonk density scale, Le Chonk doesn't just top the chart. It is the chart. Eleven chonk units, and climbing!"
     },
     {
       "type": "bullets",
@@ -48,7 +48,7 @@
     {
       "type": "outro",
       "text": "Le Chonk approves",
-      "narration": "Stay chonky, my friends. Le Chonk approved this video."
+      "narration": " Le Chonk approved this video. Stay chonky, my friends!"
     }
   ]
 }

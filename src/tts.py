@@ -26,7 +26,11 @@ def get_api_key() -> str:
 FALLBACK_VOICE_SLUGS = [
     "en_gb_jane_neutral",
     "gb_jane_neutral",
+    "en-GB-jane_neutral",
     "en_jane_neutral",
+    "en_emma_neutral",
+    "en_paul_neutral",
+    "casual_male",
 ]
 
 
@@ -81,17 +85,70 @@ def default_voice() -> str:
     return _default_voice_cache
 
 
+def _speech(payload: dict) -> dict:
+    req = _rq.Request(
+        API_URL,
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {get_api_key()}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with _rq.urlopen(req, timeout=300) as resp:
+            return json.loads(resp.read())
+    except HTTPError as e:
+        detail = e.read().decode(errors="replace")[:500]
+        raise RuntimeError(f"Mistral TTS API error {e.code}: {detail}") from e
+
+
 def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
                   voice_id: str | None = None, model: str = "voxtral-mini-tts-2603",
                   fmt: str = "mp3") -> str:
     """Synthesize one narration clip via the Mistral TTS REST API; return its path."""
     payload: dict = {"model": model, "input": text, "response_format": fmt}
+    tried = []
+
+    def base(voice: str | None, use_id: bool = False) -> dict:
+        p = dict(payload)
+        if use_id:
+            p["voice_id"] = voice
+        else:
+            p["voice"] = voice
+        return p
+
     if voice_id:
-        payload["voice_id"] = voice_id
-    elif voice_slug:
-        payload["voice"] = voice_slug
+        body = _speech(base(voice_id, use_id=True))
     else:
-        payload["voice"] = default_voice()
+        candidates = ([voice_slug] if voice_slug else []) + \
+            ([s for s in FALLBACK_VOICE_SLUGS if not voice_slug or s != voice_slug]
+             if not voice_slug else [])
+        if not candidates:
+            candidates = [default_voice()]
+        last_err = None
+        for slug in candidates:
+            try:
+                body = _speech(base(slug))
+                break
+            except RuntimeError as e:
+                if "invalid_voice" in str(e) or "Voice" in str(e) or " not found" in str(e):
+                    print(f"[warn] voice '{slug}' rejected, trying next")
+                    tried.append(slug)
+                    last_err = e
+                    continue
+                raise
+        else:
+            raise RuntimeError(
+                f"No usable voice (tried: {tried}). Last error: {last_err}"
+            )
+
+    audio_b64 = body.get("audio_data") or body.get("audio")
+    if not audio_b64:
+        raise RuntimeError(f"Unexpected TTS response keys: {list(body)}")
+    Path(out_path).write_bytes(base64.b64decode(audio_b64))
+    return str(out_path)
 
     req = _rq.Request(
         API_URL,

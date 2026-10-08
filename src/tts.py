@@ -29,23 +29,25 @@ def default_voice() -> str:
     if _default_voice_cache:
         return _default_voice_cache
     req = _rq.Request(
-        VOICES_URL,
+        VOICES_URL + "?limit=200&offset=0",
         headers={"Authorization": f"Bearer {get_api_key()}", "Accept": "application/json"},
         method="GET",
     )
     with _rq.urlopen(req, timeout=60) as resp:
         body = json.loads(resp.read())
-    voices = body.get("voices", body if isinstance(body, list) else [])
-    for v in voices:
-        slug = v.get("slug") or v.get("id") or v.get("name", "")
-        if slug.startswith("en_"):
-            _default_voice_cache = slug
-            return slug
-    if voices:
-        slug = (voices[0].get("slug") or voices[0].get("id") or voices[0].get("name"))
-        _default_voice_cache = slug
-        return slug
-    raise RuntimeError("No voices available from /v1/audio/voices")
+    voices = body.get("voices") or body.get("data") or body.get("results") or []
+    slugs = [v.get("slug") or v.get("id") or v.get("name") for v in voices]
+    slugs = [s for s in slugs if s]
+    if not slugs:
+        raise RuntimeError(
+            "No voices available from /v1/audio/voices (raw keys: %s)" % list(body)
+        )
+    for s in slugs:
+        if s.startswith("en_"):
+            _default_voice_cache = s
+            return s
+    _default_voice_cache = slugs[0]
+    return slugs[0]
 
 
 def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,

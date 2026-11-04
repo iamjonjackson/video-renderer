@@ -3,6 +3,8 @@
 Declarative video generation pipeline: describe scenes in a JSON spec, get an
 MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
 
+This is a test edit
+
 ## How it works
 
 1. You provide a **spec** (JSON) — a timeline of scenes with text, charts,

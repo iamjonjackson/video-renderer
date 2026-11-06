@@ -107,11 +107,12 @@ See `samples/sample-spec.json` for a complete example.
 
 ### Getting a Mistral API key
 
-1. Sign up at [console.mistral.ai](https://console.mistral.ai) — a free tier
-   is available for prototyping
-2. Create a key under **API Keys**, copy it into your `.env`:
+Students: request a key from your hackathon organiser.
+
+- Free API access is not currently available from Mistral but the Pro (Education) option is very affordable if you wanted to sign up at [console.mistral.ai](https://console.mistral.ai)
+- If you have a paid account, you can create a key under **API Keys**, copy it into your `.env`:
    `MISTRAL_API_KEY=...`
-3. Rate limits and model availability depend on your tier — see the
+- Rate limits and model availability depend on your tier — see the
    **Limits** page in the console for your current allowances
 
 ## Contributing

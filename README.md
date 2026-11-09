@@ -61,6 +61,15 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
 
 - **Scene types**: `title`, `bullets`, `chart` (bar/line/pie), `image`, `outro`
 - **Animations**: `fade`, `slide-up`, `zoom-in`, `kenburns` (images)
+- **Subtitles**: narrated renders automatically emit a UTF-8 `.srt` next to
+  the video (`output/demo.mp4` → `output/demo.srt`). Open the video with this
+  file in VLC, or upload it as captions on YouTube. Cues contain at most two
+  42-character lines and last at most 6.5 seconds. They start with each
+  scene's audio and end before its padding; splits within narration are
+  estimated by text length, rather than word-level alignment. Both
+  `narration` and `narration_per_bullet` are supported. Scenes without audio
+  (including skipped TTS) produce no cues. A fully silent render removes
+  any old `.srt` with the same stem.
 - **PPTX export**: every render also emits a `.pptx` alongside the MP4 —
   one slide per scene, built from the same artifacts (narration WAVs
   embedded on their slides, chart PNGs, generated images). Open in
@@ -116,6 +125,12 @@ Students: request a key from your hackathon organiser.
    **Limits** page in the console for your current allowances
 
 ## Contributing
+
+Run the subtitle and render integration checks locally without API calls:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 Work happens on a branch in your fork **first**; the PR comes last.
 

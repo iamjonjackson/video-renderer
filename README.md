@@ -1,7 +1,9 @@
 # video-renderer
 
 Declarative video generation pipeline: describe scenes in a JSON spec, get an
-MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
+MP4 with animated visuals and TTS voiceover. Mistral Voxtral is the default;
+Google Gemini TTS, ElevenLabs, and fal.ai endpoints are also supported (see
+[TTS providers](#tts-providers)).
 
 ## How it works
 
@@ -86,23 +88,65 @@ the render continues with a warning (best-effort) — it never aborts.
 by construction) with the image in a bordered panel.
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
   `padding` (default 1.0s) adds a guaranteed tail buffer after narration.
-- **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a
-  cloned `voice_id` from a 2–3s audio sample.
+- **Voice**: provider-specific. Mistral accepts built-in voice slugs
+  (`GET /v1/audio/voices`) or a cloned `voice_id`; Google uses voice names
+  such as `Kore`; ElevenLabs uses voice IDs; fal uses its endpoint's voice
+  name. See [TTS providers](#tts-providers).
 - Full contract: `src/schema.json` (JSON Schema).
 
 See `samples/sample-spec.json` for a complete example.
 
+## TTS providers
+
+Narration defaults to Mistral Voxtral. Choose a provider with `voice.provider`,
+`meta.tts.provider`, or `TTS_PROVIDER`.
+
+| Provider | Key | Notes |
+|---|---|---|
+| `mistral` | `MISTRAL_API_KEY` | default; voice slug or cloned `voice_id` |
+| `google` | `GOOGLE_API_KEY` | Gemini 3.8 Flash TTS (Interactions API), WAV; voice name (`Kore`); `voice.model` override |
+| `elevenlabs` | `ELEVENLABS_API_KEY` | free: 10k credits/month, non-commercial + attribution, MP3; WAV/PCM requires Pro; default voice Sarah |
+| `fal` | `FAL_KEY` | fal TTS endpoint in `voice.model` (default `fal-ai/elevenlabs/tts/eleven-v3`) |
+
+Voice precedence: `voice.*` > `meta.tts.*` > env (`MISTRAL_VOICE`,
+`GOOGLE_VOICE`, `ELEVENLABS_VOICE_ID`, `FAL_VOICE`) > provider default.
+`voice.strict: true` disables defaults/fallbacks and fails instead of
+substituting another voice. Cache keys include provider, voice, model, style,
+format, and strict. Missing keys or API failures show a warning and render that
+scene silently. Put keys in `.env` (gitignored) — never commit them.
+Keys: [Mistral](https://console.mistral.ai), [Google AI Studio](https://aistudio.google.com/apikey), [ElevenLabs](https://elevenlabs.io/app/settings/api-keys), [fal](https://fal.ai/dashboard/keys).
+
+```json
+{ "voice": { "provider": "google", "slug": "Kore", "strict": true } }
+```
+
+### Direct TTS CLI
+
+Synthesize a single clip without rendering a video:
+
+```bash
+python src/tts_cli.py --provider google --text "Hello from Gemini." \
+  --output temp/gemini.wav --voice Kore --strict
+```
+
+`--provider` defaults to `TTS_PROVIDER` (Mistral if unset). `--output`
+defaults to `output/tts.<format>`; a missing extension is added, and a
+mismatched one is rejected. Use `--format mp3|wav` where supported and
+`--list-providers` to print the choices.
+
 ## Files
 
 - `src/render.py` — spec → MP4 renderer (MoviePy + Matplotlib)
-- `src/tts.py` — Mistral Voxtral TTS REST client (`/v1/audio/speech`)
+- `src/tts_cli.py` — one-shot TTS CLI (provider / text / output)
+- `src/tts.py` — TTS provider dispatch + Mistral/Google/ElevenLabs/fal adapters
 - `src/schema.json` — JSON Schema for the spec
 - `src/themes/presets.py` — dark/light color presets
 - `demos/` — rendered example videos from `samples/sample-spec.json`
 
 ## Notes
 
-- TTS is skipped gracefully (with a warning) when `MISTRAL_API_KEY` is unset.
+- TTS is skipped gracefully (with a warning) when the selected provider's
+  key is unset or its API fails.
 - Never commit API keys; pass via environment only.
 
 ### Getting a Mistral API key

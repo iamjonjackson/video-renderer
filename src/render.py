@@ -9,6 +9,7 @@ length + padding), unless an explicit `duration` overrides them.
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -65,7 +66,11 @@ def load_spec(path: str) -> dict:
 
 
 def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
-    """Synthesize narration if present; return (audio_path, duration)."""
+    """Synthesize narration if present; return (audio_path, duration).
+
+    Cache keys include provider + voice + model + style, so switching any of
+    them regenerates audio instead of replaying another provider's clip.
+    """
     texts = []
     per_bullet = scene.get("narration_per_bullet")
     if per_bullet:
@@ -74,21 +79,41 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
         texts = [scene["narration"]]
     if not texts:
         return None, 0.0
+
+    provider = tts.resolve_provider(voice_cfg)
+    model = voice_cfg.get("model")
+    fmt = tts.resolve_format(provider, voice_cfg.get("format"), model)
+    strict = bool(voice_cfg.get("strict", False))
+    voice_slug, voice_id = tts.resolve_voice(
+        provider, voice_cfg.get("slug") or voice_cfg.get("name"),
+        voice_cfg.get("voice_id"))
+    style = voice_cfg.get("style")
+
     paths = []
     for i, text in enumerate(texts):
-        h = hashlib.sha1(text.encode()).hexdigest()[:10]
-        out = workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'wav')}"
+        cache_key = {
+            "text": text,
+            "provider": provider,
+            "voice_slug": voice_slug,
+            "voice_id": voice_id,
+            "model": model,
+            "style": style,
+            "format": fmt,
+            "strict": strict,
+        }
+        h = hashlib.sha1(json.dumps(cache_key, sort_keys=True).encode()).hexdigest()[:10]
+        out = workdir / f"narr_{h}_{i}.{fmt}"
         if not out.exists():
             tts.synth_to_file(
                 text, str(out),
-                voice_slug=voice_cfg.get("slug"), voice_id=voice_cfg.get("voice_id"),
-                model=voice_cfg.get("model", "voxtral-mini-tts-2603"),
-                fmt=voice_cfg.get("format", "wav"),
+                voice_slug=voice_slug, voice_id=voice_id,
+                model=model, fmt=fmt, provider=provider, style=style,
+                strict=strict,
             )
         paths.append(str(out))
     if len(paths) == 1:
         return paths[0], tts.audio_duration(paths[0])
-    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
+    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{fmt}"
     if not combined.exists():
         merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
         merged.write_audiofile(str(combined), logger=None)
@@ -393,7 +418,10 @@ def _export_pptx(spec, scene_artifacts, output):
 def render(spec_path: str, output: str, workdir: str | None = None):
     spec = load_spec(spec_path)
     theme = spec["theme"]
-    voice_cfg = spec.get("voice", {})
+    # Spec-level meta.tts options act as defaults; voice.* wins on conflicts.
+    voice_cfg = dict(spec.get("voice", {}))
+    for key, value in ((spec.get("meta") or {}).get("tts") or {}).items():
+        voice_cfg.setdefault(key, value)
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
 
@@ -416,12 +444,16 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
         try:
             audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
-        except RuntimeError as e:
-            if "MISTRAL_API_KEY" in str(e):
-                print(f"[warn] {e} — rendering scene {i} without narration")
-                audio_path, audio_dur = None, 0.0
-            else:
-                raise
+        except tts.StrictVoiceError:
+            # Strict mode is an explicit request to fail rather than substitute.
+            raise
+        except tts.MissingAPIKey as e:
+            print(f"[warn] {e} — rendering scene {i} without narration")
+            audio_path, audio_dur = None, 0.0
+        except tts.TTSError as e:
+            print(f"[warn] narration failed ({e}) — "
+                  f"rendering scene {i} without narration")
+            audio_path, audio_dur = None, 0.0
 
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)

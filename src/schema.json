@@ -15,7 +15,16 @@
             "height": { "type": "integer", "default": 1080 }
           }
         },
-        "fps": { "type": "integer", "default": 30 }
+        "fps": { "type": "integer", "default": 30 },
+        "tts": {
+          "type": "object",
+          "description": "Narration provider defaults; matching voice.* keys win",
+          "properties": {
+            "provider": { "type": "string", "enum": ["mistral", "google", "elevenlabs", "fal"], "default": "mistral" },
+            "style": { "type": "string", "description": "Style prompt (Google speech_metadata / fal Gemini style_instructions)" },
+            "strict": { "type": "boolean", "default": false, "description": "Disable voice defaults/fallbacks; fail if no explicit voice or it is rejected" }
+          }
+        }
       }
     },
     "theme": {
@@ -32,10 +41,14 @@
     "voice": {
       "type": "object",
       "properties": {
-        "slug": { "type": "string", "description": "Mistral TTS voice slug, e.g. en_jane_neutral" },
-        "voice_id": { "type": "string", "description": "Mistral TTS cloned voice UUID (overrides slug)" },
-        "model": { "type": "string", "default": "voxtral-mini-tts-2603" },
-        "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3" }
+        "provider": { "type": "string", "enum": ["mistral", "google", "elevenlabs", "fal"], "description": "Overrides meta.tts.provider and TTS_PROVIDER" },
+        "slug": { "type": "string", "description": "Provider voice name/slug (Mistral slug, Google voice like Kore, ElevenLabs voice ID)" },
+        "name": { "type": "string", "description": "Alias for slug" },
+        "voice_id": { "type": "string", "description": "Provider voice ID (Mistral cloned UUID / ElevenLabs voice ID); overrides slug" },
+        "model": { "type": "string", "description": "Provider model; Google e.g. gemini-3.8-flash-tts; for fal this is the endpoint ID (e.g. fal-ai/elevenlabs/tts/eleven-v3)" },
+        "style": { "type": "string", "description": "Style prompt (Google speech_metadata / fal Gemini)" },
+        "strict": { "type": "boolean", "description": "Overrides meta.tts.strict; fail instead of using a default/fallback voice" },
+        "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3", "description": "Requested format; providers may normalise (Google always WAV, ElevenLabs defaults to MP3, fal often MP3)" }
       }
     },
     "timeline": {

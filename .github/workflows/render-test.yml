@@ -20,6 +20,9 @@ jobs:
         run: |
           pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx
 
+      - name: Run provider unit tests
+        run: python3 -m unittest discover -s tests -v
+
       - name: Render ${{ matrix.spec }}
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}

@@ -64,6 +64,31 @@ def load_spec(path: str) -> dict:
     return spec
 
 
+def narration_settings(voice_cfg: dict) -> dict:
+    """Resolve provider, voice, model and file extension for narration.
+
+    The spec's voice settings (slug, voice_id, model, format) only apply when
+    they were written for the selected provider: a spec without
+    "voice.provider" is treated as Mistral, so its Mistral slug is not sent
+    to Google or ElevenLabs when TTS_PROVIDER switches provider.
+    """
+    provider = tts.resolve_provider(voice_cfg)
+    cfg = voice_cfg if voice_cfg.get("provider", "mistral").lower() == provider else {}
+    if provider == "google":
+        ext = "wav"
+    elif provider == "elevenlabs":
+        ext = "mp3"
+    else:
+        ext = cfg.get("format", "wav")
+    return {
+        "provider": provider,
+        "slug": cfg.get("slug"),
+        "voice_id": cfg.get("voice_id"),
+        "model": cfg.get("model"),
+        "ext": ext,
+    }
+
+
 def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
     """Synthesize narration if present; return (audio_path, duration)."""
     texts = []
@@ -74,21 +99,27 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
         texts = [scene["narration"]]
     if not texts:
         return None, 0.0
+    ns = narration_settings(voice_cfg)
+    provider, ext = ns["provider"], ns["ext"]
+    # Cache key covers provider + voice + model so switching any of them
+    # regenerates audio instead of replaying another provider's clip.
+    voice_key = ns["voice_id"] or ns["slug"] or "default"
+    model_key = ns["model"] or "default"
     paths = []
     for i, text in enumerate(texts):
-        h = hashlib.sha1(text.encode()).hexdigest()[:10]
-        out = workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'wav')}"
+        key = f"{provider}|{voice_key}|{model_key}|{text}"
+        h = hashlib.sha1(key.encode()).hexdigest()[:10]
+        out = workdir / f"narr_{provider}_{h}_{i}.{ext}"
         if not out.exists():
-            tts.synth_to_file(
+            out = Path(tts.synth_to_file(
                 text, str(out),
-                voice_slug=voice_cfg.get("slug"), voice_id=voice_cfg.get("voice_id"),
-                model=voice_cfg.get("model", "voxtral-mini-tts-2603"),
-                fmt=voice_cfg.get("format", "wav"),
-            )
+                voice_slug=ns["slug"], voice_id=ns["voice_id"],
+                model=ns["model"], fmt=ext, provider=provider,
+            ))
         paths.append(str(out))
     if len(paths) == 1:
         return paths[0], tts.audio_duration(paths[0])
-    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
+    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{ext}"
     if not combined.exists():
         merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
         merged.write_audiofile(str(combined), logger=None)
@@ -416,12 +447,10 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
         try:
             audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
-        except RuntimeError as e:
-            if "MISTRAL_API_KEY" in str(e):
-                print(f"[warn] {e} — rendering scene {i} without narration")
-                audio_path, audio_dur = None, 0.0
-            else:
-                raise
+        except (tts.MissingAPIKeyError, tts.TTSProviderError) as e:
+            # Missing key or provider failure: degrade to a silent scene.
+            print(f"[warn] {e} — rendering scene {i} without narration")
+            audio_path, audio_dur = None, 0.0
 
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)

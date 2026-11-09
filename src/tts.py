@@ -1,6 +1,5 @@
 import os
 import json
-import os
 import base64
 from pathlib import Path
 from urllib import request as _rq
@@ -11,14 +10,26 @@ VOICES_URL = "https://api.mistral.ai/v1/audio/voices"
 
 _default_voice_cache: str | None = None
 
+PROVIDERS = ("mistral", "google", "elevenlabs")
+DEFAULT_MISTRAL_MODEL = "voxtral-mini-tts-2603"
+
+
+class MissingAPIKeyError(RuntimeError):
+    """A provider's API key env var is not set."""
+
+    def __init__(self, env_var: str):
+        super().__init__(f"{env_var} not set")
+        self.env_var = env_var
+
+
+class TTSProviderError(RuntimeError):
+    """A TTS provider request failed (HTTP error, bad response, no usable voice)."""
+
 
 def get_api_key() -> str:
     key = os.environ.get("MISTRAL_API_KEY")
     if not key:
-        raise RuntimeError(
-            "MISTRAL_API_KEY not set. Provide it via environment (e.g. from a "
-            "Drive file read into the env at render time); never paste it in chat."
-        )
+        raise MissingAPIKeyError("MISTRAL_API_KEY")
     return key
 
 
@@ -100,12 +111,12 @@ def _speech(payload: dict) -> dict:
             return json.loads(resp.read())
     except HTTPError as e:
         detail = e.read().decode(errors="replace")[:500]
-        raise RuntimeError(f"Mistral TTS API error {e.code}: {detail}") from e
+        raise TTSProviderError(f"Mistral TTS API error {e.code}: {detail}") from e
 
 
-def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
-                  voice_id: str | None = None, model: str = "voxtral-mini-tts-2603",
-                  fmt: str = "wav") -> str:
+def _synth_mistral(text: str, out_path: str, voice_slug: str | None = None,
+                   voice_id: str | None = None, model: str = DEFAULT_MISTRAL_MODEL,
+                   fmt: str = "wav") -> str:
     """Synthesize one narration clip via the Mistral TTS REST API; return its path."""
     payload: dict = {"model": model, "input": text, "response_format": fmt}
     tried = []
@@ -141,38 +152,47 @@ def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
                     continue
                 raise
         if body is None:
-            raise RuntimeError(
+            raise TTSProviderError(
                 f"No usable voice (tried: {tried}). Last error: {last_err}"
             )
 
     audio_b64 = body.get("audio_data") or body.get("audio")
     if not audio_b64:
-        raise RuntimeError(f"Unexpected TTS response keys: {list(body)}")
+        raise TTSProviderError(f"Unexpected TTS response keys: {list(body)}")
     Path(out_path).write_bytes(base64.b64decode(audio_b64))
     return str(out_path)
 
-    req = _rq.Request(
-        API_URL,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {get_api_key()}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with _rq.urlopen(req, timeout=300) as resp:
-            body = json.loads(resp.read())
-    except HTTPError as e:
-        detail = e.read().decode(errors="replace")[:500]
-        raise RuntimeError(f"Mistral TTS API error {e.code}: {detail}") from e
 
-    audio_b64 = body.get("audio_data") or body.get("audio")
-    if not audio_b64:
-        raise RuntimeError(f"Unexpected TTS response keys: {list(body)}")
-    Path(out_path).write_bytes(base64.b64decode(audio_b64))
-    return str(out_path)
+def resolve_provider(voice_cfg: dict | None = None) -> str:
+    """Pick the TTS provider: spec "voice.provider", then TTS_PROVIDER, then mistral."""
+    provider = ((voice_cfg or {}).get("provider")
+                or os.environ.get("TTS_PROVIDER")
+                or "mistral").strip().lower()
+    if provider not in PROVIDERS:
+        raise ValueError(
+            f"Unknown TTS provider {provider!r}; expected one of {', '.join(PROVIDERS)}"
+        )
+    return provider
+
+
+def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
+                  voice_id: str | None = None, model: str | None = None,
+                  fmt: str = "wav", provider: str | None = None) -> str:
+    """Synthesize one narration clip with the selected provider; return its path.
+
+    The returned path may have a different extension from out_path
+    (Google always writes .wav, ElevenLabs always writes .mp3).
+    """
+    provider = provider or resolve_provider()
+    if provider == "google":
+        import tts_google
+        return tts_google.synth_to_file(text, out_path, voice=voice_slug, model=model)
+    if provider == "elevenlabs":
+        import tts_elevenlabs
+        return tts_elevenlabs.synth_to_file(text, out_path,
+                                            voice=voice_id or voice_slug, model=model)
+    return _synth_mistral(text, out_path, voice_slug=voice_slug, voice_id=voice_id,
+                          model=model or DEFAULT_MISTRAL_MODEL, fmt=fmt)
 
 
 def audio_duration(path: str) -> float:

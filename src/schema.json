@@ -32,9 +32,10 @@
     "voice": {
       "type": "object",
       "properties": {
-        "slug": { "type": "string", "description": "Mistral TTS voice slug, e.g. en_jane_neutral" },
-        "voice_id": { "type": "string", "description": "Mistral TTS cloned voice UUID (overrides slug)" },
-        "model": { "type": "string", "default": "voxtral-mini-tts-2603" },
+        "provider": { "type": "string", "enum": ["mistral", "google", "elevenlabs"], "default": "mistral", "description": "TTS provider. If unset, the TTS_PROVIDER env var is used, then mistral. The voice settings below only apply when this matches the provider in use." },
+        "slug": { "type": "string", "description": "Voice name: Mistral slug (e.g. en_jane_neutral), Gemini voice (e.g. Kore, Charon) or ElevenLabs voice ID" },
+        "voice_id": { "type": "string", "description": "Mistral cloned voice UUID or ElevenLabs voice ID (overrides slug)" },
+        "model": { "type": "string", "description": "Provider model. Defaults: voxtral-mini-tts-2603 (mistral), gemini-2.5-flash-preview-tts (google), eleven_multilingual_v2 (elevenlabs)" },
         "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3" }
       }
     },

@@ -26,6 +26,9 @@ jobs:
         run: |
           python3 src/render.py samples/${{ matrix.spec }}.json -o output/${{ matrix.spec }}.mp4
 
+      - name: Test subtitle export
+        run: python3 -m unittest discover -s tests -v
+
       - name: Upload rendered video
         uses: actions/upload-artifact@v4
         with:
@@ -33,4 +36,5 @@ jobs:
           path: |
             output/${{ matrix.spec }}.mp4
             output/${{ matrix.spec }}.pptx
+            output/${{ matrix.spec }}.srt
           retention-days: 14

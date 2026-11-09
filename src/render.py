@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent / "themes"))
 import images as imggen
 import tts
 import presets
+import subtitles
 
 ANIM_IN = 0.6
 SLIDE_DIST = 120
@@ -380,6 +381,16 @@ def _ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+def _export_srt(cues, output):
+    path = Path(output).with_suffix(".srt")
+    if cues:
+        subtitles.write_srt(path, cues)
+        print(f"[done] {path} ({len(cues)} subtitle cues)")
+    else:
+        # If we render a silent video with the same name, remove its old subtitles.
+        path.unlink(missing_ok=True)
+
+
 def _export_pptx(spec, scene_artifacts, output):
     try:
         import pptx_export
@@ -399,6 +410,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
     video_clips, audios = [], []
     scene_artifacts = []
+    subtitle_cues = []
     t_cursor = 0.0
     fps = spec["meta"]["fps"]
     stream = len(spec["timeline"]) > 12
@@ -436,6 +448,11 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))
+            # Use the same text as the audio, including per-bullet narration.
+            narration = " ".join(scene["narration_per_bullet"]) \
+                if scene.get("narration_per_bullet") else scene.get("narration", "")
+            # Stop at the end of the audio so captions don't linger in the padding.
+            subtitle_cues.extend(subtitles.narration_cues(narration, t_cursor, audio_dur))
 
         # Bound memory on long timelines: render each scene straight to a
         # disk segment and release it, instead of holding every composite.
@@ -490,6 +507,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
                            "-shortest", tmp], check=True)
             Path(tmp).replace(output)
         print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps, streamed)")
+        _export_srt(subtitle_cues, output)
         _export_pptx(spec, scene_artifacts, output)
         return
 
@@ -500,6 +518,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
                           audio_codec="aac", logger=None)
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
 
+    _export_srt(subtitle_cues, output)
     _export_pptx(spec, scene_artifacts, output)
 
 

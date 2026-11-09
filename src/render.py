@@ -64,6 +64,81 @@ def load_spec(path: str) -> dict:
     return spec
 
 
+BRAND_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+
+def _frac_or_px(value, frame_px: int) -> float:
+    """Values below 1 are a fraction of frame_px; 1 and above are pixels."""
+    value = float(value)
+    return frame_px * value if 0 < value < 1 else value
+
+
+def prepare_branding(branding: dict | None, base_dir: Path) -> dict | None:
+    """Validate the spec's branding block once and pre-load the logo.
+
+    Returns None when there is no branding block, so unbranded specs take
+    exactly the same code path as before this feature existed.
+    """
+    if not branding:
+        return None
+
+    logo_value = branding.get("logo")
+    if not logo_value:
+        raise ValueError("branding.logo is required")
+    logo_path = Path(logo_value)
+    if not logo_path.is_absolute():
+        logo_path = (base_dir / logo_path).resolve()  # relative to the spec file
+    if not logo_path.is_file():
+        raise FileNotFoundError(f"branding logo not found: {logo_path}")
+
+    position = str(branding.get("position", "bottom-right")).lower().replace("_", "-")
+    if position not in BRAND_POSITIONS:
+        raise ValueError(f"branding.position must be one of {', '.join(BRAND_POSITIONS)}; got {position!r}")
+
+    opacity = float(branding.get("opacity", 1.0))
+    if not 0.0 <= opacity <= 1.0:
+        raise ValueError("branding.opacity must be between 0 and 1")
+
+    # Never touch the frame border (same idea as the chart margins).
+    margin = max(1, int(round(_frac_or_px(branding.get("margin", 48), H))))
+    max_h = int(_frac_or_px(branding.get("max_height", 0.10), H))
+    if max_h < 1:
+        raise ValueError("branding.max_height must be > 0")
+
+    scenes = branding.get("scenes", "all")
+    if scenes != "all":
+        if isinstance(scenes, str):
+            scenes = [scenes]
+        scenes = {str(s).lower() for s in scenes}
+
+    # transparent=True turns the PNG alpha channel into the clip's mask.
+    logo = ImageClip(str(logo_path), transparent=True)
+    if logo.h > max_h:  # scale down to max height, keep aspect ratio, never upscale
+        logo = logo.resized(height=max_h)
+    logo = logo.with_opacity(opacity)  # multiplies the alpha mask
+
+    x = margin if "left" in position else W - logo.w - margin
+    y = margin if "top" in position else H - logo.h - margin
+    if x < 1 or y < 1:
+        raise ValueError("branding logo plus margin does not fit in the frame")
+
+    return {"logo": logo.with_position((int(x), int(y))), "scenes": scenes}
+
+
+def apply_branding(clip, scene_type: str, brand: dict | None):
+    """Overlay the prepared logo on this scene if the scenes filter allows it."""
+    if brand is None:
+        return clip
+    if brand["scenes"] != "all" and scene_type.lower() not in brand["scenes"]:
+        return clip
+    # Pin the scene at "center", exactly as concatenate_videoclips(method="compose")
+    # would, so animations that set a position (slide-up) are not shifted.
+    return CompositeVideoClip(
+        [clip.with_position("center"), brand["logo"].with_duration(clip.duration)],
+        size=(W, H),
+    ).with_duration(clip.duration)
+
+
 def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
     """Synthesize narration if present; return (audio_path, duration)."""
     texts = []
@@ -108,7 +183,6 @@ def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float
     if scene.get("type") == "bullets":
         return 1.2 + scene.get("stagger", 0.4) * len(scene.get("items", [])) + 2.0
     return default
-
 
 
 def centered_text_clip(text: str, theme: dict, size: int, color: str | None = None,
@@ -394,6 +468,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     spec = load_spec(spec_path)
     theme = spec["theme"]
     voice_cfg = spec.get("voice", {})
+    brand = prepare_branding(spec.get("branding"), Path(spec_path).resolve().parent)
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
 
@@ -433,6 +508,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         if scene.get("anim") in ("zoom-in", "kenburns"):
             clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
                 .with_duration(dur)
+        clip = apply_branding(clip, stype, brand)
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))
@@ -511,3 +587,4 @@ if __name__ == "__main__":
     args = p.parse_args()
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     render(args.spec, args.output, args.workdir)
+    

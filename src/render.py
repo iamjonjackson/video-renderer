@@ -12,6 +12,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from pptx import presentation
 
 import matplotlib
 matplotlib.use("Agg")
@@ -304,41 +305,86 @@ def build_image(scene, theme, workdir):
         clips.extend([cap_bg, cap])
     return CompositeVideoClip(clips, size=(W, H))
 
-
-def build_chart(scene, theme, workdir):
+def generate_chart_png(scene, theme, workdir):
     fig, ax = plt.subplots(figsize=(19.2, 10.8), dpi=100)
     fig.patch.set_facecolor(theme["bg"])
     ax.set_facecolor(theme["bg"])
     ax.tick_params(colors=theme["fg"], labelsize=18)
+
     for spine in ax.spines.values():
         spine.set_color(theme["fg"])
+
     if scene.get("chart_type", "bar") == "bar":
-        bars = ax.bar(scene["labels"], scene["values"],
-                      color=theme["accent"], width=0.55)
+        bars = ax.bar(
+            scene["labels"],
+            scene["values"],
+            color=theme["accent"],
+            width=0.55
+        )
     elif scene["chart_type"] == "line":
-        ax.plot(scene["labels"], scene["values"], color=theme["accent"],
-                linewidth=4, marker="o", markersize=10)
+        ax.plot(
+            scene["labels"],
+            scene["values"],
+            color=theme["accent"],
+            linewidth=4,
+            marker="o",
+            markersize=10
+        )
     else:
-        ax.pie(scene["values"], labels=scene["labels"], colors=[theme["accent"], theme["fg"], "#888"],
-               textprops={"color": theme["fg"], "fontsize": 18}, autopct="%1.0f%%")
+        ax.pie(
+            scene["values"],
+            labels=scene["labels"],
+            colors=[theme["accent"], theme["fg"], "#888"],
+            textprops={"color": theme["fg"], "fontsize": 18},
+            autopct="%1.0f%%"
+        )
+
     if scene["chart_type"] != "pie":
         if scene.get("y_label"):
-            ax.set_ylabel(scene["y_label"], color=theme["fg"], fontsize=20)
-        ax.set_title(scene.get("heading", ""), color=theme["fg"],
-                     fontsize=28, pad=20)
+            ax.set_ylabel(
+                scene["y_label"],
+                color=theme["fg"],
+                fontsize=20
+            )
+
+        ax.set_title(
+            scene.get("heading", ""),
+            color=theme["fg"],
+            fontsize=28,
+            pad=20
+        )
         ax.grid(axis="y", alpha=0.25, color=theme["fg"])
+
     fig.tight_layout(pad=3.5)
-    out = workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
+
+    out = workdir / (
+        f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
+    )
+
     fig.savefig(out, facecolor=theme["bg"])
     plt.close(fig)
+
+    return str(out)
+
+def build_chart(scene, theme, workdir):
+    chart_path = generate_chart_png(scene, theme, workdir)
+
     # Fit inside the frame with a 6% margin on all sides
     margin = 0.06
-    img = ImageClip(str(out))
-    scale = min(W * (1 - 2 * margin) / img.w, H * (1 - 2 * margin) / img.h)
+
+    img = ImageClip(chart_path)
+    scale = min(
+        W * (1 - 2 * margin) / img.w,
+        H * (1 - 2 * margin) / img.h
+    )
+
     img = img.resized(scale)
+
     x = (W - img.w) // 2
     y = (H - img.h) // 2
+
     img = img.with_position((x, y))
+
     return CompositeVideoClip([img], size=(W, H))
 
 
@@ -390,13 +436,111 @@ def _export_pptx(spec, scene_artifacts, output):
         print(f"[warn] pptx export failed: {e}")
 
 
-def render(spec_path: str, output: str, workdir: str | None = None):
+def render_pptx_only(spec: dict, workdir: Path, output: str):
+    """Generate a PowerPoint without creating video clips."""
+
+    theme = spec["theme"]
+    voice_cfg = spec.get("voice", {})
+
+    scene_artifacts = []
+    t_cursor = 0.0
+
+    for i, scene in enumerate(spec["timeline"]):
+        stype = scene["type"]
+        art = {}
+
+        # 1. Generate or reuse narration
+        try:
+            audio_path, audio_dur = synth_narration(
+                scene, workdir, voice_cfg
+            )
+        except RuntimeError as e:
+            if "MISTRAL_API_KEY" in str(e):
+                print(f"[warn] {e} — scene {i} has no narration")
+                audio_path, audio_dur = None, 0.0
+            else:
+                raise
+
+        if audio_path:
+            art["narration_path"] = audio_path
+
+        # 2. Generate chart PNG without MoviePy
+        if stype == "chart":
+            art["chart_png"] = generate_chart_png(
+                scene, theme, workdir
+            )
+
+        # 3. Collect image scene assets
+        if stype == "image":
+            art["image_png"] = scene["src"]
+
+        # 4. Generate or reuse AI images
+        if scene.get("image"):
+            img_path = scene_image_clip(
+                scene, theme, workdir
+            )
+
+            if img_path:
+                placement = scene["image"].get(
+                    "placement", "background"
+                )
+
+                if placement in ("left", "right"):
+                    art["image_png"] = img_path
+                else:
+                    art["bg_image_png"] = img_path
+
+                    scrim, _ = imggen.scrim_for_contrast(
+                        img_path,
+                        theme["fg"],
+                        theme["bg"],
+                        img_opacity=scene["image"].get(
+                            "opacity", 0.25
+                        )
+                    )
+                    art["scrim"] = scrim
+
+        # 5. Calculate and log scene duration
+        dur = scene_duration(scene, audio_dur)
+
+        print(
+            f"[scene {i}] {stype}: {dur:.2f}s "
+            f"starting at {t_cursor:.2f}s"
+            + (
+                f" (narration {audio_dur:.2f}s)"
+                if audio_path else ""
+            )
+        )
+
+        t_cursor += dur
+        scene_artifacts.append(art)
+
+    # 6. Export PowerPoint
+    import pptx_export
+
+    pptx_path = str(Path(output).with_suffix(".pptx"))
+    pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
+
+    print(
+        f"[done] {pptx_path} "
+        f"({len(scene_artifacts)} slides, "
+        f"{t_cursor:.1f}s total)"
+    )
+
+
+
+def render(spec_path: str, output: str, workdir: str | None = None, render_video: bool = True):
     spec = load_spec(spec_path)
     theme = spec["theme"]
     voice_cfg = spec.get("voice", {})
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
-
+    if not render_video:
+        render_pptx_only(spec, workdir, output)
+        return
+    if not render_video:
+        render_pptx_only(spec, workdir, output)
+        return
     video_clips, audios = [], []
     scene_artifacts = []
     t_cursor = 0.0
@@ -508,6 +652,12 @@ if __name__ == "__main__":
     p.add_argument("spec")
     p.add_argument("-o", "--output", default="output/video.mp4")
     p.add_argument("--workdir", default=None)
+    p.add_argument(
+    "--pptx-only",
+    action="store_true",
+    help="Generate PowerPoint without rendering video"
+)
     args = p.parse_args()
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    render(args.spec, args.output, args.workdir)
+    render(args.spec, args.output, args.workdir, render_video=not args.pptx_only)
+   

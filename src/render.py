@@ -381,9 +381,34 @@ def _ffmpeg_exe() -> str:
 
 
 def _export_pptx(spec, scene_artifacts, output):
+    pptx_path = str(Path(output).with_suffix(".pptx"))
+    script = Path(__file__).resolve().parent.parent / "scripts" / "export_pptx.js"
+    spec_path = Path(output).with_suffix(".spec.json")
+
+    # Prefer the Node-native PPTX exporter implemented with pptxgenjs so
+    # chart slides remain editable PowerPoint objects instead of flat PNGs.
+    if script.exists():
+        try:
+            spec_path.write_text(json.dumps(spec))
+            result = subprocess.run(
+                ["node", str(script), "--spec", str(spec_path), "--output", pptx_path],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0 and Path(pptx_path).exists():
+                print(f"[done] {pptx_path} ({len(scene_artifacts)} slides)")
+                spec_path.unlink(missing_ok=True)
+                return
+            print(f"[warn] native PPTX exporter failed: {result.stderr.strip() or result.stdout.strip()}")
+        except Exception as e:
+            print(f"[warn] native PPTX exporter failed: {e}")
+        finally:
+            if spec_path.exists():
+                spec_path.unlink(missing_ok=True)
+
     try:
         import pptx_export
-        pptx_path = str(Path(output).with_suffix(".pptx"))
         pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
         print(f"[done] {pptx_path} ({len(scene_artifacts)} slides)")
     except Exception as e:

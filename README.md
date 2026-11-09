@@ -21,7 +21,8 @@ cd video-renderer
 python3 -m venv .venv && source .venv/bin/activate
 pip install moviepy matplotlib imageio-ffmpeg pillow
 
-cp .env.example .env     # then edit .env and add your MISTRAL_API_KEY
+
+     # then edit .env and add your MISTRAL_API_KEY
 set -a; source .env; set +a   # load env vars (or use dotenv in your shell)
 
 # Final videos go to ./output, intermediate render files to ./temp
@@ -29,6 +30,7 @@ python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 ```
 
 Notes:
+
 - `.env` is gitignored; `.env.example` documents the variables.
 - `output/` (final videos) and `temp/` (TTS/image caches, intermediate
   artifacts) are gitignored except their `.gitkeep` placeholders.
@@ -45,16 +47,21 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
 
 ```json
 {
-  "meta":  { "fps": 30 },
+  "meta": { "fps": 30 },
   "theme": { "preset": "dark", "accent": "#58a6ff" },
   "voice": { "slug": "gb_jane_neutral" },
   "timeline": [
-    { "type": "title",  "text": "Quarterly Review", "narration": "..." },
+    { "type": "title", "text": "Quarterly Review", "narration": "..." },
     { "type": "bullets", "heading": "Key Wins", "items": ["...", "..."] },
-    { "type": "chart",  "chart_type": "bar", "labels": ["Jul","Aug","Sep"],
-                        "values": [410, 455, 512], "narration": "..." },
-    { "type": "image",  "src": "assets/slide.png", "anim": "kenburns" },
-    { "type": "outro",  "text": "Thank you" }
+    {
+      "type": "chart",
+      "chart_type": "bar",
+      "labels": ["Jul", "Aug", "Sep"],
+      "values": [410, 455, 512],
+      "narration": "..."
+    },
+    { "type": "image", "src": "assets/slide.png", "anim": "kenburns" },
+    { "type": "outro", "text": "Thank you" }
   ]
 }
 ```
@@ -66,6 +73,42 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
   embedded on their slides, chart PNGs, generated images). Open in
   PowerPoint, tweak, and export to video from there for a near-identical
   result.
+- **Native PowerPoint charts**: chart scenes are exported as editable
+  PowerPoint chart objects via `pptxgenjs`, not static PNG snapshots. This
+  means instructors and students can restyle the chart, edit values, or copy
+  it into a report without losing the underlying chart data.
+
+### Native chart export validation
+
+Use the no-AI export path to validate the fix without triggering Mistral
+charges:
+
+```bash
+cd /Users/maryam/Desktop/QMUL/hackathon
+node scripts/export_pptx.js --spec samples/sample-spec.json --output output/demo-native.pptx
+```
+
+Then verify the generated PowerPoint contains native chart XML:
+
+```bash
+python - <<'PY'
+import zipfile
+p='output/demo-native.pptx'
+with zipfile.ZipFile(p) as zf:
+    names = zf.namelist()
+    chart_files = [n for n in names if n.startswith('ppt/charts/')]
+    print('chart_files=', chart_files)
+    print('chart_count=', len(chart_files))
+    for name in chart_files:
+        if name.endswith('.xml'):
+            data = zf.read(name)
+            print(name, 'contains_chart=', b'chart' in data.lower())
+PY
+```
+
+A working export should show `ppt/charts/chart1.xml` and a non-zero chart
+count. This confirms the PPTX contains real chart objects, not an embedded PNG.
+
 - **AI-generated images** (optional, any scene): add an `image` block —
 
 ```json
@@ -84,6 +127,7 @@ AA (≥ 4.5:1) is met. If the target can't be reached even at maximum scrim,
 the render continues with a warning (best-effort) — it never aborts.
 `left`/`right` placements keep text on the solid theme background (contrast
 by construction) with the image in a bordered panel.
+
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
   `padding` (default 1.0s) adds a guaranteed tail buffer after narration.
 - **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a
@@ -111,9 +155,9 @@ Students: request a key from your hackathon organiser.
 
 - Free API access is not currently available from Mistral but the Pro (Education) option is very affordable if you wanted to sign up at [console.mistral.ai](https://console.mistral.ai)
 - If you have a paid account, you can create a key under **API Keys**, copy it into your `.env`:
-   `MISTRAL_API_KEY=...`
+  `MISTRAL_API_KEY=...`
 - Rate limits and model availability depend on your tier — see the
-   **Limits** page in the console for your current allowances
+  **Limits** page in the console for your current allowances
 
 ## Contributing
 

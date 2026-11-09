@@ -8,7 +8,9 @@ import json
 from pathlib import Path
 
 from pptx import Presentation
+from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
@@ -19,6 +21,87 @@ SLIDE_H = Inches(7.5)
 def _rgb(hex_color: str) -> RGBColor:
     h = hex_color.lstrip("#")
     return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def _native_chart_type(chart_type: str):
+    mapping = {
+        "bar": XL_CHART_TYPE.BAR_CLUSTERED,
+        "line": XL_CHART_TYPE.LINE,
+        "pie": XL_CHART_TYPE.PIE,
+    }
+    return mapping.get((chart_type or "bar").lower())
+
+
+def _apply_native_chart_theme(chart, fg: RGBColor, accent: RGBColor, bg: RGBColor):
+    chart.has_legend = True
+    chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+    chart.legend.font.color.rgb = fg
+    chart.legend.font.size = Pt(10)
+
+    chart.chart_area.format.fill.solid()
+    chart.chart_area.format.fill.fore_color.rgb = bg
+    chart.chart_area.format.line.color.rgb = fg
+
+    chart.plot_area.format.fill.solid()
+    chart.plot_area.format.fill.fore_color.rgb = bg
+    chart.plot_area.format.line.color.rgb = fg
+
+    for series in chart.series:
+        try:
+            series.format.fill.solid()
+            series.format.fill.fore_color.rgb = accent
+            series.format.line.color.rgb = accent
+        except Exception:
+            pass
+        try:
+            series.format.line.color.rgb = accent
+            series.format.line.width = Pt(2.5)
+        except Exception:
+            pass
+
+    try:
+        chart.category_axis.tick_labels.font.color.rgb = fg
+        chart.value_axis.tick_labels.font.color.rgb = fg
+        chart.category_axis.has_major_gridlines = False
+        chart.value_axis.has_major_gridlines = True
+        chart.value_axis.major_gridlines.format.line.color.rgb = fg
+        chart.value_axis.major_gridlines.format.line.width = Pt(0.75)
+    except Exception:
+        pass
+
+
+def _add_native_chart(slide, scene: dict, bg: RGBColor, fg: RGBColor, accent: RGBColor):
+    labels = scene.get("labels") or []
+    values = scene.get("values") or []
+    if not labels or not values:
+        return False
+
+    chart_type = _native_chart_type(scene.get("chart_type", "bar"))
+    if chart_type is None:
+        return False
+
+    chart_data = CategoryChartData()
+    chart_data.categories = labels
+    chart_data.add_series("Series", values[: len(labels)])
+
+    chart = slide.shapes.add_chart(
+        Inches(1.1), Inches(1.5), SLIDE_W - Inches(2.2), SLIDE_H - Inches(2.6),
+        chart_type, chart_data
+    ).chart
+
+    _apply_native_chart_theme(chart, fg, accent, bg)
+
+    if scene.get("heading"):
+        hb = slide.shapes.add_textbox(Inches(1.2), Inches(0.6), SLIDE_W - Inches(2.4), Inches(0.8))
+        hp = hb.text_frame.paragraphs[0]
+        hr = hp.add_run()
+        hr.text = scene["heading"]
+        hr.font.size = Pt(24)
+        hr.font.bold = True
+        hr.font.color.rgb = accent
+        hp.alignment = PP_ALIGN.LEFT
+
+    return True
 
 
 def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
@@ -102,12 +185,31 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                     left=SLIDE_W - Inches(5.4), top=Inches(1.2),
                     width=Inches(4.8), height=Inches(4.8))
         elif stype == "chart":
-            if art.get("chart_png"):
-                slide.shapes.add_picture(
-                    art["chart_png"],
-                    left=Inches(0.8), top=Inches(0.8),
-                    width=SLIDE_W - Inches(1.6),
-                    height=SLIDE_H - Inches(1.6))
+            mode = (scene.get("pptx_chart") or scene.get("chart_export") or "native").lower()
+            native_used = False
+            if mode == "native":
+                try:
+                    native_used = _add_native_chart(slide, scene, bg, fg, accent)
+                except Exception as exc:
+                    print(f"[warn] native PPTX chart export failed for scene: {exc}")
+                    native_used = False
+
+            if not native_used:
+                if mode == "png":
+                    if art.get("chart_png"):
+                        slide.shapes.add_picture(
+                            art["chart_png"],
+                            left=Inches(0.8), top=Inches(0.8),
+                            width=SLIDE_W - Inches(1.6),
+                            height=SLIDE_H - Inches(1.6))
+                elif art.get("chart_png"):
+                    slide.shapes.add_picture(
+                        art["chart_png"],
+                        left=Inches(0.8), top=Inches(0.8),
+                        width=SLIDE_W - Inches(1.6),
+                        height=SLIDE_H - Inches(1.6))
+                else:
+                    print("[warn] chart scene has no native chart data and no PNG fallback")
         elif stype == "image" and art.get("image_png"):
             slide.shapes.add_picture(art["image_png"], 0, 0,
                                      width=SLIDE_W, height=SLIDE_H)

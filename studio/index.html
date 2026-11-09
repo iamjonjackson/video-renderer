@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Frame — Video Studio</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#editor">Skip to scene editor</a>
+    <header class="topbar">
+      <a class="brand" href="/"
+        ><span class="brand-mark" aria-hidden="true">▰</span
+        ><span>frame<span class="brand-sub">VIDEO STUDIO</span></span></a
+      >
+      <div class="local-badge"><span></span> Local workspace</div>
+      <div class="header-actions">
+        <button
+          id="ui-theme"
+          class="button theme-toggle"
+          type="button"
+          aria-label="Switch to dark appearance"
+          aria-pressed="false"
+          title="Switch to dark appearance"
+        >
+          <span id="theme-icon" aria-hidden="true">☾</span
+          ><span class="sr-only">Appearance</span>
+        </button>
+        <button id="import" class="button subtle">Import JSON</button
+        ><button id="export" class="button subtle">
+          Export JSON <span aria-hidden="true">↗</span>
+        </button>
+      </div>
+      <input id="file" type="file" accept=".json,application/json" hidden />
+    </header>
+    <main>
+      <section class="project-heading" aria-labelledby="project-label">
+        <div>
+          <h1 class="eyebrow">YOUR STORY, FRAME BY FRAME</h1>
+          <label id="project-label" for="project-title" class="sr-only"
+            >Project title</label
+          ><input
+            id="project-title"
+            class="project-title"
+            maxlength="100"
+            value="The next chapter"
+          />
+          <p class="project-subtitle">
+            Shape your scenes. Refine the details. Bring your story to screen.
+          </p>
+        </div>
+        <div class="project-meta">
+          <span>1920 × 1080</span
+          ><span id="project-stats">4 scenes · 16 seconds</span>
+        </div>
+      </section>
+      <div id="notice" class="notice" role="alert" hidden></div>
+      <div class="workspace">
+        <aside class="scene-panel" aria-label="Storyboard">
+          <div class="panel-heading">
+            <h2>Storyboard</h2>
+            <span id="scene-count" class="count">04</span>
+          </div>
+          <p class="panel-description">Select a scene to edit</p>
+          <ol id="scenes" class="scene-list"></ol>
+          <label for="new-type" class="sr-only">New scene type</label>
+          <div class="add-scene">
+            <select id="new-type">
+              <option value="title">Title</option>
+              <option value="bullets">Bullets</option>
+              <option value="chart">Chart</option>
+              <option value="outro">Outro</option></select
+            ><button id="add" class="button outlined">+ Add scene</button>
+          </div>
+        </aside>
+        <section class="canvas-panel" aria-label="Scene preview">
+          <div class="canvas-toolbar">
+            <span class="eyebrow">CANVAS</span
+            ><span class="preview-label">1920 × 1080 · 16:9</span>
+          </div>
+          <div class="canvas-wrap"><div id="canvas" class="canvas"></div></div>
+          <div class="preview-caption">
+            <span id="preview-name">Scene 01 · Title</span
+            ><span>16:9 · Approximate preview</span>
+          </div>
+
+          <section class="render-card" aria-labelledby="render-title">
+            <div class="render-symbol" aria-hidden="true">↗</div>
+            <div class="render-copy">
+              <h2 id="render-title">Ready when you are</h2>
+              <p>
+                Render a silent video and editable deck, right on your computer.
+              </p>
+              <p class="render-fine">Silent export · No API calls</p>
+            </div>
+            <button id="render" class="button primary">
+              Render project <span aria-hidden="true">↗</span>
+            </button>
+            <div id="render-status" role="status" aria-live="polite"></div>
+            <div id="artifacts" class="artifacts"></div>
+          </section>
+        </section>
+        <section
+          id="editor"
+          class="editor-panel"
+          aria-label="Scene details"
+          tabindex="-1"
+        >
+          <div class="panel-heading">
+            <h2>Scene details</h2>
+            <span class="details-dot" aria-hidden="true"></span>
+          </div>
+          <div class="scene-heading">
+            <span id="editor-index" class="eyebrow">SCENE 01</span>
+            <h3 id="editor-kind">Title</h3>
+          </div>
+          <form id="scene-form" novalidate></form>
+          <div class="scene-actions">
+            <button
+              id="up"
+              class="button subtle"
+              aria-label="Earlier: move selected scene"
+            >
+              ↑ Earlier</button
+            ><button
+              id="down"
+              class="button subtle"
+              aria-label="Later: move selected scene"
+            >
+              ↓ Later</button
+            ><button
+              id="delete"
+              class="button danger"
+              aria-label="Delete selected scene"
+            >
+              Delete
+            </button>
+          </div>
+          <hr />
+          <div class="panel-heading">
+            <h2>Video style</h2>
+            <span aria-hidden="true">◐</span>
+          </div>
+          <label for="preset">Video background</label
+          ><select id="preset">
+            <option value="dark">Midnight</option>
+            <option value="light">Paper</option></select
+          ><label for="accent">Accent colour</label>
+          <div class="colour-field">
+            <input type="color" id="accent" value="#bba5ff" /><span
+              id="accent-value"
+              >#BBA5FF</span
+            >
+          </div>
+          <p class="field-hint">
+            UI uses your system font. Final renders use DejaVu Sans.
+          </p>
+        </section>
+      </div>
+      <footer class="page-footer">
+        <span
+          >Your project stays in this browser. Export JSON to keep a copy.</span
+        ><span>Local only · Up to 12 scenes / 60 seconds</span>
+      </footer>
+    </main>
+  </body>
+</html>

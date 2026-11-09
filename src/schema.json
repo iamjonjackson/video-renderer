@@ -38,6 +38,25 @@
         "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3" }
       }
     },
+    "branding": {
+      "type": "object",
+      "properties": {
+        "logo": { "type": "string", "description": "Path to a PNG logo or watermark asset" },
+        "position": { "type": "string", "enum": ["top-left", "top-right", "bottom-left", "bottom-right"], "default": "bottom-right" },
+        "margin": { "type": ["number", "integer"], "description": "Pixels or fractional margin from the frame edge; values 0-1 treated as a fraction of the min dimension", "default": 48 },
+        "opacity": { "type": ["number", "integer"], "minimum": 0, "maximum": 1, "default": 1.0 },
+        "max_height": { "type": ["number", "integer"], "description": "Maximum logo height in pixels or as a fraction of frame height (0-1)", "default": 0.1 },
+        "scenes": {
+          "oneOf": [
+            { "type": "string", "enum": ["all"] },
+            { "type": "array", "items": { "type": "string" }, "description": "Scene types to show the logo on, e.g. ['title', 'outro']" }
+          ],
+          "default": "all"
+        }
+      },
+      "required": ["logo"],
+      "additionalProperties": false
+    },
     "timeline": {
       "type": "array",
       "items": { "$ref": "#/definitions/scene" }

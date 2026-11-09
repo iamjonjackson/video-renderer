@@ -18,7 +18,10 @@ jobs:
 
       - name: Install Python deps
         run: |
-          pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx
+          pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx jsonschema pytest
+
+      - name: Run tests
+        run: python3 -m pytest tests -q
 
       - name: Render ${{ matrix.spec }}
         env:

@@ -1,0 +1,6 @@
+{
+  "timeline": [
+    { "type": "bullets", "items": ["a"],
+      "image": { "placement": "middle", "opacity": 2 } }
+  ]
+}

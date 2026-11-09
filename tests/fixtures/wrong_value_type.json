@@ -1,0 +1,7 @@
+{
+  "meta": { "fps": "30" },
+  "timeline": [
+    { "type": "bullets", "items": ["a", "b"], "stagger": "0.5" },
+    { "type": "chart", "labels": ["Jul", "Aug"], "values": ["410", 455] }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "theme": { "preset": "drak" },
+  "timeline": [
+    { "type": "title", "text": "Hello", "anim": "zoom" }
+  ]
+}

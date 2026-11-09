@@ -19,7 +19,7 @@ MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
 git clone https://github.com/iamjonjackson/video-renderer.git
 cd video-renderer
 python3 -m venv .venv && source .venv/bin/activate
-pip install moviepy matplotlib imageio-ffmpeg pillow
+pip install moviepy matplotlib imageio-ffmpeg pillow jsonschema
 
 cp .env.example .env     # then edit .env and add your MISTRAL_API_KEY
 set -a; source .env; set +a   # load env vars (or use dotenv in your shell)
@@ -35,6 +35,25 @@ Notes:
 - Without `MISTRAL_API_KEY`, scenes render silently and AI image blocks are
   skipped with a warning — the pipeline never hard-fails on missing AI.
 - System ffmpeg is used if installed; otherwise `imageio-ffmpeg` bundles one.
+
+### Validating a spec
+
+Every render checks the spec against `src/schema.json` first and stops
+before rendering anything if there are problems. It lists all of them at
+once, numbered by scene (from 0, matching the `[scene N]` render log):
+
+```
+$ python3 src/render.py my-spec.json --validate
+[spec] my-spec.json: 3 problems found
+  - scene 0: unknown type 'titel' — did you mean 'title'? (valid types: title, bullets, image, chart, outro)
+  - scene 1 (bullets): missing required field 'items'
+  - scene 2 (chart): 'chart_type' must be one of 'bar', 'line', 'pie' (got 'donut')
+```
+
+`--validate` only checks the spec and exits `0` (valid) or `1` (problems),
+which is handy in CI. `python3 src/validate.py my-spec.json` does the same
+without loading the renderer. Run the tests with
+`pip install pytest && python3 -m pytest tests`.
 
 ### GitHub Actions
 
@@ -97,6 +116,8 @@ See `samples/sample-spec.json` for a complete example.
 - `src/render.py` — spec → MP4 renderer (MoviePy + Matplotlib)
 - `src/tts.py` — Mistral Voxtral TTS REST client (`/v1/audio/speech`)
 - `src/schema.json` — JSON Schema for the spec
+- `src/validate.py` — spec validation with friendly, scene-numbered errors
+- `tests/` — validation tests and deliberately broken spec fixtures
 - `src/themes/presets.py` — dark/light color presets
 - `demos/` — rendered example videos from `samples/sample-spec.json`
 

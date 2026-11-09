@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent / "themes"))
 import images as imggen
 import tts
 import presets
+from validate import SpecError, load_and_validate, report
 
 ANIM_IN = 0.6
 SLIDE_DIST = 120
@@ -54,7 +55,8 @@ def _resolve_font(bold: bool = False) -> str:
 
 
 def load_spec(path: str) -> dict:
-    spec = json.loads(Path(path).read_text())
+    """Read, validate (raises SpecError listing every problem) and theme-merge a spec."""
+    spec = load_and_validate(path)
     theme = dict(presets.__dict__[spec.get("theme", {}).get("preset", "dark")])
     theme.update({k: v for k, v in spec.get("theme", {}).items() if k != "preset"})
     spec["theme"] = theme
@@ -508,6 +510,16 @@ if __name__ == "__main__":
     p.add_argument("spec")
     p.add_argument("-o", "--output", default="output/video.mp4")
     p.add_argument("--workdir", default=None)
+    p.add_argument("--validate", action="store_true",
+                   help="only check the spec against the schema; exit 0 if valid, 1 if not")
     args = p.parse_args()
+    try:
+        spec = load_and_validate(args.spec)
+    except SpecError as e:
+        print(report(args.spec, e), file=sys.stderr)
+        sys.exit(1)
+    if args.validate:
+        print(f"[spec] {args.spec}: OK ({len(spec['timeline'])} scenes)")
+        sys.exit(0)
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     render(args.spec, args.output, args.workdir)

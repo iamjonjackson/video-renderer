@@ -1,0 +1,6 @@
+{
+  "timeline": [
+    { "type": "title", "text": "Hello" },
+    { "type": "bullet", "heading": "Typo in type", "items": ["one", "two"] }
+  ]
+}

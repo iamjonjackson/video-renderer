@@ -1,0 +1,7 @@
+{
+  "timeline": [
+    { "type": "titel", "text": "Typo in type" },
+    { "type": "bullets", "heading": "Missing items" },
+    { "type": "chart", "chart_type": "donut", "labels": ["a"], "values": [1] }
+  ]
+}

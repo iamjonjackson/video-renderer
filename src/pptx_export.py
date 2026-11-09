@@ -142,8 +142,9 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 bar.fill.fore_color.rgb = RGBColor(0, 0, 0)
                 _set_fill_alpha(bar, 0.6)
                 bar.line.fill.background()
+                # video centres the caption at 92% of frame height
                 cb = slide.shapes.add_textbox(
-                    Inches(1), SLIDE_H - bar_h,
+                    Inches(1), int(SLIDE_H * 0.92) - bar_h // 2,
                     SLIDE_W - Inches(2), bar_h)
                 cb.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
                 cp = cb.text_frame.paragraphs[0]

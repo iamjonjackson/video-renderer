@@ -12,6 +12,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from jsonschema import Draft7Validator
+from difflib import get_close_matches
 
 import matplotlib
 matplotlib.use("Agg")
@@ -53,8 +55,83 @@ def _resolve_font(bold: bool = False) -> str:
     raise RuntimeError("No suitable TTF font found; install fonts-dejavu or matplotlib")
 
 
+def validate_spec(spec: dict) -> None:
+    schema_path = Path(__file__).with_name("schema.json")
+    schema = json.loads(schema_path.read_text())
+
+    # Collect all validation errors
+    errors = []
+
+    # Check the overall JSON structure
+    validator = Draft7Validator(schema)
+
+    # Check top-level fields without duplicating scene errors
+    for error in validator.iter_errors(spec):
+        if "timeline" not in error.path:
+            errors.append(f"Spec: {error.message}")
+        elif len(error.path) == 1:
+            errors.append(f"Timeline: {error.message}")
+
+    # Stop if the specification is not an object
+    if not isinstance(spec, dict):
+        if errors:
+            raise ValueError("\n".join(errors))
+        return
+
+    timeline = spec.get("timeline")
+
+    # Stop if the timeline is not a list
+    if not isinstance(timeline, list):
+        if errors:
+            raise ValueError("\n".join(errors))
+        return
+
+    scene_types = ["title", "bullets", "image", "chart", "outro"]
+
+    # Check each scene individually
+    for index, scene in enumerate(timeline, start=1):
+        if not isinstance(scene, dict):
+            errors.append(f"Scene {index}: must be an object")
+            continue
+
+        scene_type = scene.get("type")
+
+        # Check whether the scene type is recognised
+        if scene_type not in scene_types:
+            suggestion = get_close_matches(
+                str(scene_type), scene_types, n=1
+            )
+
+            message = f"Scene {index}: unknown type '{scene_type}'"
+
+            if suggestion:
+                message += f" — did you mean '{suggestion[0]}'?"
+
+            errors.append(message)
+            continue
+
+        # Validate against the matching scene definition
+        scene_schema = {
+            "$ref": f"#/definitions/{scene_type}",
+            "definitions": schema["definitions"]
+        }
+
+        scene_validator = Draft7Validator(scene_schema)
+
+        for error in scene_validator.iter_errors(scene):
+            errors.append(f"Scene {index}: {error.message}")
+
+    # Report all errors together
+    if errors:
+        raise ValueError("\n".join(errors))
+
+
 def load_spec(path: str) -> dict:
     spec = json.loads(Path(path).read_text())
+
+#check whether the schema is being followed
+    validate_spec(spec) 
+
     theme = dict(presets.__dict__[spec.get("theme", {}).get("preset", "dark")])
     theme.update({k: v for k, v in spec.get("theme", {}).items() if k != "preset"})
     spec["theme"] = theme

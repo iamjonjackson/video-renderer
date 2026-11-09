@@ -28,6 +28,7 @@ import presets
 
 ANIM_IN = 0.6
 SLIDE_DIST = 120
+BULLET_FADE = 0.3  # seconds each bullet takes to fade in (issue #5)
 W, H = 1920, 1080
 
 
@@ -277,11 +278,19 @@ def build_bullets(scene, theme, workdir=None):
     b_size = int(theme["font_size"] * 0.55)
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
+    stagger = scene.get("stagger", 0.4)
     for i, item in enumerate(scene["items"]):
         bullet = _left_text_clip("• " + item, theme, b_size,
                                  max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
-        clips.append(bullet.with_position((x, y)))
+        bullet = bullet.with_position((x, y))
+        if stagger > 0:
+            if bullet.mask is None:
+                bullet = bullet.with_mask()
+            bullet = bullet.with_mask(bullet.mask.with_effects([vfx.FadeIn(BULLET_FADE)]))
+            bullet = bullet.with_start(i * stagger)
+        clips.append(bullet)
+
     return CompositeVideoClip(clips, size=(W, H))
 
 

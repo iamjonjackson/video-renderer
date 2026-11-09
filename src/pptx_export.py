@@ -128,7 +128,10 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 art["narration_path"],
                 left=SLIDE_W - Inches(1.05), top=SLIDE_H - Inches(1.05),
                 width=Inches(0.8), height=Inches(0.8),
-                poster_frame_image=None, mime_type="audio/wav"
+                poster_frame_image=None,
+                mime_type=("audio/mpeg"
+                           if str(art["narration_path"]).lower().endswith(".mp3")
+                           else "audio/wav")
             )
 
     prs.save(output_path)

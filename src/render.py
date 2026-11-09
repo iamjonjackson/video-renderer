@@ -305,7 +305,10 @@ def build_image(scene, theme, workdir):
     return CompositeVideoClip(clips, size=(W, H))
 
 
-def build_chart(scene, theme, workdir):
+def render_chart_png(scene: dict, theme: dict, workdir: Path) -> str:
+    out = workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
+    if out.exists():
+        return str(out)
     fig, ax = plt.subplots(figsize=(19.2, 10.8), dpi=100)
     fig.patch.set_facecolor(theme["bg"])
     ax.set_facecolor(theme["bg"])
@@ -328,12 +331,16 @@ def build_chart(scene, theme, workdir):
                      fontsize=28, pad=20)
         ax.grid(axis="y", alpha=0.25, color=theme["fg"])
     fig.tight_layout(pad=3.5)
-    out = workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
     fig.savefig(out, facecolor=theme["bg"])
     plt.close(fig)
+    return str(out)
+
+
+def build_chart(scene, theme, workdir):
+    out = render_chart_png(scene, theme, workdir)
     # Fit inside the frame with a 6% margin on all sides
     margin = 0.06
-    img = ImageClip(str(out))
+    img = ImageClip(out)
     scale = min(W * (1 - 2 * margin) / img.w, H * (1 - 2 * margin) / img.h)
     img = img.resized(scale)
     x = (W - img.w) // 2
@@ -380,6 +387,34 @@ def _ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+def collect_scene_artifacts(scene: dict, theme: dict, workdir: Path, voice_cfg: dict,
+                            scene_index: int | None = None) -> tuple[dict, str | None, float]:
+    try:
+        audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
+    except RuntimeError as e:
+        if "MISTRAL_API_KEY" in str(e):
+            print(f"[warn] {e} — rendering scene {scene_index} without narration")
+            audio_path, audio_dur = None, 0.0
+        else:
+            raise
+
+    art = {}
+    if audio_path:
+        art["narration_path"] = audio_path
+    if scene["type"] == "chart":
+        art["chart_png"] = render_chart_png(scene, theme, workdir)
+    img_path = scene_image_clip(scene, theme, workdir) if scene.get("image") else None
+    if img_path:
+        if scene.get("image", {}).get("placement", "background") in ("left", "right"):
+            art["image_png"] = img_path
+        else:
+            art["bg_image_png"] = img_path
+            scrim, _ = imggen.scrim_for_contrast(
+                img_path, theme["fg"], theme["bg"], img_opacity=scene["image"].get("opacity", 0.25))
+            art["scrim"] = scrim
+    return art, audio_path, audio_dur
+
+
 def _export_pptx(spec, scene_artifacts, output):
     try:
         import pptx_export
@@ -390,7 +425,7 @@ def _export_pptx(spec, scene_artifacts, output):
         print(f"[warn] pptx export failed: {e}")
 
 
-def render(spec_path: str, output: str, workdir: str | None = None):
+def render(spec_path: str, output: str, workdir: str | None = None, render_video: bool = True):
     spec = load_spec(spec_path)
     theme = spec["theme"]
     voice_cfg = spec.get("voice", {})
@@ -401,71 +436,57 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     scene_artifacts = []
     t_cursor = 0.0
     fps = spec["meta"]["fps"]
-    stream = len(spec["timeline"]) > 12
+    stream = render_video and len(spec["timeline"]) > 12
     seg_dir = workdir / "segments"
     if stream:
         seg_dir.mkdir(exist_ok=True)
         print(f"[stream] long timeline ({len(spec['timeline'])} scenes); rendering per-scene segments")
     for i, scene in enumerate(spec["timeline"]):
         stype = scene["type"]
-        builder = BUILDERS[stype]
-        if stype in ("image", "chart", "title", "bullets"):
-            clip = builder(scene, theme, workdir)
-        else:
-            clip = builder(scene, theme)
-
-        try:
-            audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
-        except RuntimeError as e:
-            if "MISTRAL_API_KEY" in str(e):
-                print(f"[warn] {e} — rendering scene {i} without narration")
-                audio_path, audio_dur = None, 0.0
-            else:
-                raise
-
+        art, audio_path, audio_dur = collect_scene_artifacts(
+            scene, theme, workdir, voice_cfg, scene_index=i)
         dur = scene_duration(scene, audio_dur)
-        clip = clip.with_duration(dur)
-        clip = apply_anim(clip, scene.get("anim", "fade"), dur)
-        # Animations like zoom-in resize frames over time even though the
-        # clip's nominal size stays 1920x1080; composite onto the fixed canvas
-        # so encoding always sees constant frame dimensions (variable-size
-        # streams decode as garbage/static in players).
-        if scene.get("anim") in ("zoom-in", "kenburns"):
-            clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
-                .with_duration(dur)
 
-        if audio_path:
-            audios.append(AudioFileClip(audio_path).with_start(t_cursor))
-
-        # Bound memory on long timelines: render each scene straight to a
-        # disk segment and release it, instead of holding every composite.
-        if stream:
-            seg = seg_dir / f"seg_{i:03d}.mp4"
-            clip.write_videofile(str(seg), fps, codec="libx264", logger=None)
-            clip.close()
-            del clip
-        else:
-            video_clips.append(clip)
-
-        art = {}
-        if audio_path:
-            art["narration_path"] = audio_path
-        img_path = scene_image_clip(scene, theme, workdir) if scene.get("image") else None
-        if stype == "chart":
-            art["chart_png"] = str(workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png")
-        if img_path:
-            if scene.get("image", {}).get("placement", "background") in ("left", "right"):
-                art["image_png"] = img_path
+        if render_video:
+            builder = BUILDERS[stype]
+            if stype in ("image", "chart", "title", "bullets"):
+                clip = builder(scene, theme, workdir)
             else:
-                art["bg_image_png"] = img_path
-                scrim, _ = imggen.scrim_for_contrast(
-                    img_path, theme["fg"], theme["bg"], img_opacity=scene["image"].get("opacity", 0.25))
-                art["scrim"] = scrim
+                clip = builder(scene, theme)
+
+            clip = clip.with_duration(dur)
+            clip = apply_anim(clip, scene.get("anim", "fade"), dur)
+            # Animations like zoom-in resize frames over time even though the
+            # clip's nominal size stays 1920x1080; composite onto the fixed canvas
+            # so encoding always sees constant frame dimensions (variable-size
+            # streams decode as garbage/static in players).
+            if scene.get("anim") in ("zoom-in", "kenburns"):
+                clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
+                    .with_duration(dur)
+
+            if audio_path:
+                audios.append(AudioFileClip(audio_path).with_start(t_cursor))
+
+            # Bound memory on long timelines: render each scene straight to a
+            # disk segment and release it, instead of holding every composite.
+            if stream:
+                seg = seg_dir / f"seg_{i:03d}.mp4"
+                clip.write_videofile(str(seg), fps, codec="libx264", logger=None)
+                clip.close()
+                del clip
+            else:
+                video_clips.append(clip)
+
         scene_artifacts.append(art)
 
         print(f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
               + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
         t_cursor += dur
+
+    if not render_video:
+        print(f"[done] pptx-only ({t_cursor:.1f}s timeline, {len(scene_artifacts)} scenes, no video encoded)")
+        _export_pptx(spec, scene_artifacts, output)
+        return
 
     if stream:
         # Concatenate segments with the ffmpeg concat demuxer (O(1) memory;
@@ -508,6 +529,9 @@ if __name__ == "__main__":
     p.add_argument("spec")
     p.add_argument("-o", "--output", default="output/video.mp4")
     p.add_argument("--workdir", default=None)
+    p.add_argument("--pptx-only", action="store_true",
+                   help="skip the video path entirely; only build narration/images/"
+                        "charts and assemble the .pptx (no MP4 written)")
     args = p.parse_args()
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    render(args.spec, args.output, args.workdir)
+    render(args.spec, args.output, args.workdir, render_video=not args.pptx_only)

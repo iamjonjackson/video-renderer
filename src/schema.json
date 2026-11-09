@@ -35,7 +35,55 @@
         "slug": { "type": "string", "description": "Mistral TTS voice slug, e.g. en_jane_neutral" },
         "voice_id": { "type": "string", "description": "Mistral TTS cloned voice UUID (overrides slug)" },
         "model": { "type": "string", "default": "voxtral-mini-tts-2603" },
-        "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3" }
+        "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3" },
+        "google": {
+          "type": "object",
+          "description": "Settings used only when TTS_PROVIDER=google",
+          "properties": {
+            "slug": {
+              "type": "string",
+              "default": "Kore",
+              "description": "Gemini prebuilt voice name"
+            },
+            "model": {
+              "type": "string",
+              "default": "gemini-2.5-flash-preview-tts"
+            },
+            "style": {
+              "type": "string",
+              "description": "Delivery instructions prepended to the narration"
+            },
+            "format": {
+              "enum": [
+                "wav"
+              ],
+              "default": "wav"
+            }
+          },
+          "additionalProperties": false
+        },
+        "elevenlabs": {
+          "type": "object",
+          "description": "Settings used only when TTS_PROVIDER=elevenlabs",
+          "properties": {
+            "voice_id": {
+              "type": "string",
+              "description": "API-eligible voice ID; omitted to select a built-in account voice"
+            },
+            "model": {
+              "type": "string",
+              "default": "eleven_multilingual_v2"
+            },
+            "format": {
+              "enum": [
+                "wav",
+                "mp3"
+              ],
+              "default": "mp3"
+            }
+          },
+          "additionalProperties": false
+        }
       }
     },
     "timeline": {

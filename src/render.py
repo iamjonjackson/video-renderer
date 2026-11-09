@@ -7,6 +7,7 @@ Scene durations are audio-driven when `narration` is present (duration = audio
 length + padding), unless an explicit `duration` overrides them.
 """
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import subprocess
@@ -74,24 +75,30 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
         texts = [scene["narration"]]
     if not texts:
         return None, 0.0
+    provider = tts.get_provider()
+    # keep existing mistral settings separate from the other providers
+    cfg = voice_cfg if provider == "mistral" else voice_cfg.get(provider, {})
+    options = tts.resolve_options(provider=provider, voice_slug=cfg.get("slug"),
+                                  voice_id=cfg.get("voice_id"), model=cfg.get("model"),
+                                  fmt=cfg.get("format"), style=cfg.get("style"))
     paths = []
     for i, text in enumerate(texts):
-        h = hashlib.sha1(text.encode()).hexdigest()[:10]
-        out = workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'wav')}"
+        # changing provider, voice or delivery settings must create fresh audio
+        cache = json.dumps({"text": text, **options}, sort_keys=True)
+        h = hashlib.sha256(cache.encode()).hexdigest()[:20]
+        out = workdir / f"narr_{provider}_{h}_{i}.{options['fmt']}"
         if not out.exists():
-            tts.synth_to_file(
-                text, str(out),
-                voice_slug=voice_cfg.get("slug"), voice_id=voice_cfg.get("voice_id"),
-                model=voice_cfg.get("model", "voxtral-mini-tts-2603"),
-                fmt=voice_cfg.get("format", "wav"),
-            )
+            tts.synth_to_file(text, str(out), **options)
         paths.append(str(out))
     if len(paths) == 1:
         return paths[0], tts.audio_duration(paths[0])
-    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
+    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{options['fmt']}"
     if not combined.exists():
-        merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
-        merged.write_audiofile(str(combined), logger=None)
+        # close per-bullet readers after joining their audio
+        with ExitStack() as stack:
+            clips = [stack.enter_context(AudioFileClip(p)) for p in paths]
+            with concatenate_audioclips(clips) as merged:
+                merged.write_audiofile(str(combined), logger=None)
     return str(combined), tts.audio_duration(str(combined))
 
 
@@ -416,12 +423,10 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
         try:
             audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
-        except RuntimeError as e:
-            if "MISTRAL_API_KEY" in str(e):
-                print(f"[warn] {e} — rendering scene {i} without narration")
-                audio_path, audio_dur = None, 0.0
-            else:
-                raise
+        except tts.TTSError as e:
+            # a failed narration provider should leave a silent scene
+            print(f"[warn] {e} — rendering scene {i} without narration")
+            audio_path, audio_dur = None, 0.0
 
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)

@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent / "themes"))
 import images as imggen
 import tts
 import presets
+import subtitles
 
 ANIM_IN = 0.6
 SLIDE_DIST = 120
@@ -64,8 +65,13 @@ def load_spec(path: str) -> dict:
     return spec
 
 
-def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
-    """Synthesize narration if present; return (audio_path, duration)."""
+def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float, list[dict]]:
+    """Synthesize narration if present.
+
+    Returns (audio_path, duration, segments) where segments is
+    [{"text", "start", "duration"}] with start relative to the scene,
+    one per TTS clip (used for subtitle timing).
+    """
     texts = []
     per_bullet = scene.get("narration_per_bullet")
     if per_bullet:
@@ -73,7 +79,7 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
     elif scene.get("narration"):
         texts = [scene["narration"]]
     if not texts:
-        return None, 0.0
+        return None, 0.0, []
     paths = []
     for i, text in enumerate(texts):
         h = hashlib.sha1(text.encode()).hexdigest()[:10]
@@ -86,13 +92,18 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
                 fmt=voice_cfg.get("format", "wav"),
             )
         paths.append(str(out))
+    segments, offset = [], 0.0
+    for text, path in zip(texts, paths):
+        d = tts.audio_duration(path)
+        segments.append({"text": text, "start": offset, "duration": d})
+        offset += d
     if len(paths) == 1:
-        return paths[0], tts.audio_duration(paths[0])
+        return paths[0], segments[0]["duration"], segments
     combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
     if not combined.exists():
         merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
         merged.write_audiofile(str(combined), logger=None)
-    return str(combined), tts.audio_duration(str(combined))
+    return str(combined), tts.audio_duration(str(combined)), segments
 
 
 def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float:
@@ -380,6 +391,42 @@ def _ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+def burn_subtitles(clip, segments: list[dict], theme: dict, duration: float):
+    """Composite scene-relative subtitle cues onto the bottom of a clip."""
+    cues = subtitles.build_cues(segments)
+    if not cues:
+        return clip
+    size = int(theme["font_size"] * 0.6)
+    layers = [clip]
+    for c in cues:
+        start = max(0.0, c["start"])
+        end = min(duration, c["end"])
+        if end <= start:
+            continue
+        txt = TextClip(
+            text=c["text"], font_size=size, color="#ffffff",
+            font=_resolve_font(), method="label", text_align="center",
+            bg_color=(0, 0, 0, 170),
+            margin=(24, 10, 24, int(size * 0.45)),
+        )
+        txt = txt.with_position(((W - txt.w) // 2, int(H * 0.93) - txt.h)) \
+                 .with_start(start).with_duration(end - start)
+        layers.append(txt)
+    return CompositeVideoClip(layers, size=(W, H)).with_duration(duration)
+
+
+def _export_srt(segments: list[dict], output: str):
+    if not segments:
+        print("[info] no narration timing available; skipping .srt")
+        return
+    try:
+        srt_path = str(Path(output).with_suffix(".srt"))
+        n = subtitles.write_srt(segments, srt_path)
+        print(f"[done] {srt_path} ({n} cues)")
+    except Exception as e:
+        print(f"[warn] srt export failed: {e}")
+
+
 def _export_pptx(spec, scene_artifacts, output):
     try:
         import pptx_export
@@ -399,6 +446,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
     video_clips, audios = [], []
     scene_artifacts = []
+    subtitle_segments = []
+    subs_mode = spec.get("subtitles", "srt")
     t_cursor = 0.0
     fps = spec["meta"]["fps"]
     stream = len(spec["timeline"]) > 12
@@ -415,11 +464,11 @@ def render(spec_path: str, output: str, workdir: str | None = None):
             clip = builder(scene, theme)
 
         try:
-            audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
+            audio_path, audio_dur, segments = synth_narration(scene, workdir, voice_cfg)
         except RuntimeError as e:
             if "MISTRAL_API_KEY" in str(e):
                 print(f"[warn] {e} — rendering scene {i} without narration")
-                audio_path, audio_dur = None, 0.0
+                audio_path, audio_dur, segments = None, 0.0, []
             else:
                 raise
 
@@ -433,9 +482,13 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         if scene.get("anim") in ("zoom-in", "kenburns"):
             clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
                 .with_duration(dur)
+        if subs_mode == "burned" and segments:
+            clip = burn_subtitles(clip, segments, theme, dur)
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))
+        subtitle_segments.extend(
+            {**seg, "start": t_cursor + seg["start"]} for seg in segments)
 
         # Bound memory on long timelines: render each scene straight to a
         # disk segment and release it, instead of holding every composite.
@@ -490,6 +543,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
                            "-shortest", tmp], check=True)
             Path(tmp).replace(output)
         print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps, streamed)")
+        if subs_mode != "none":
+            _export_srt(subtitle_segments, output)
         _export_pptx(spec, scene_artifacts, output)
         return
 
@@ -500,6 +555,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
                           audio_codec="aac", logger=None)
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
 
+    if subs_mode != "none":
+        _export_srt(subtitle_segments, output)
     _export_pptx(spec, scene_artifacts, output)
 
 

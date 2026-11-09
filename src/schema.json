@@ -38,6 +38,12 @@
         "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3" }
       }
     },
+    "subtitles": {
+      "type": "string",
+      "enum": ["srt", "burned", "none"],
+      "default": "srt",
+      "description": "srt: write a .srt sidecar next to the MP4; burned: also composite subtitles onto the video; none: disable"
+    },
     "timeline": {
       "type": "array",
       "items": { "$ref": "#/definitions/scene" }

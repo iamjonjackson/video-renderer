@@ -66,6 +66,11 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
   embedded on their slides, chart PNGs, generated images). Open in
   PowerPoint, tweak, and export to video from there for a near-identical
   result.
+- **Subtitles**: every render with narration also emits a `.srt` next to
+  the MP4 (`output/demo.mp4` → `output/demo.srt`), timed from the actual
+  narration audio. Long narration is split into readable cues (≤ 2 lines of
+  ~42 chars, ≤ ~7s each). Set top-level `"subtitles": "burned"` to also draw
+  them onto the video, or `"none"` to disable.
 - **AI-generated images** (optional, any scene): add an `image` block —
 
 ```json
@@ -95,6 +100,7 @@ See `samples/sample-spec.json` for a complete example.
 ## Files
 
 - `src/render.py` — spec → MP4 renderer (MoviePy + Matplotlib)
+- `src/subtitles.py` — narration timing → SRT cues (chunking, serialize/parse)
 - `src/tts.py` — Mistral Voxtral TTS REST client (`/v1/audio/speech`)
 - `src/schema.json` — JSON Schema for the spec
 - `src/themes/presets.py` — dark/light color presets

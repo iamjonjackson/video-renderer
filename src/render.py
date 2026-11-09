@@ -1,10 +1,13 @@
 """Declarative video spec renderer.
 
 Usage:
-    python3 render.py spec.json [-o output.mp4] [--workdir /tmp/renders]
+    python3 render.py spec.json [-o output.mp4] [--workdir /tmp/renders] [--pptx-only]
 
 Scene durations are audio-driven when `narration` is present (duration = audio
 length + padding), unless an explicit `duration` overrides them.
+
+--pptx-only skips the video path and writes just the .pptx (narration,
+AI images and charts still generated, or reused from the workdir cache).
 """
 import argparse
 import hashlib
@@ -305,7 +308,12 @@ def build_image(scene, theme, workdir):
     return CompositeVideoClip(clips, size=(W, H))
 
 
-def build_chart(scene, theme, workdir):
+def chart_png_path(scene, workdir) -> Path:
+    return workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
+
+
+def render_chart_png(scene, theme, workdir) -> str:
+    """Draw the scene's chart with Matplotlib and save it into the workdir."""
     fig, ax = plt.subplots(figsize=(19.2, 10.8), dpi=100)
     fig.patch.set_facecolor(theme["bg"])
     ax.set_facecolor(theme["bg"])
@@ -328,12 +336,17 @@ def build_chart(scene, theme, workdir):
                      fontsize=28, pad=20)
         ax.grid(axis="y", alpha=0.25, color=theme["fg"])
     fig.tight_layout(pad=3.5)
-    out = workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
+    out = chart_png_path(scene, workdir)
     fig.savefig(out, facecolor=theme["bg"])
     plt.close(fig)
+    return str(out)
+
+
+def build_chart(scene, theme, workdir):
+    out = render_chart_png(scene, theme, workdir)
     # Fit inside the frame with a 6% margin on all sides
     margin = 0.06
-    img = ImageClip(str(out))
+    img = ImageClip(out)
     scale = min(W * (1 - 2 * margin) / img.w, H * (1 - 2 * margin) / img.h)
     img = img.resized(scale)
     x = (W - img.w) // 2
@@ -380,22 +393,82 @@ def _ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def _export_pptx(spec, scene_artifacts, output):
+def _export_pptx(spec, scene_artifacts, output, strict: bool = False):
+    """Write the deck next to `output`. Failures only warn unless `strict`
+    (PPTX-only mode, where the deck is the sole output)."""
     try:
         import pptx_export
         pptx_path = str(Path(output).with_suffix(".pptx"))
         pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
         print(f"[done] {pptx_path} ({len(scene_artifacts)} slides)")
     except Exception as e:
+        if strict:
+            raise
         print(f"[warn] pptx export failed: {e}")
 
 
-def render(spec_path: str, output: str, workdir: str | None = None):
+def scene_narration(scene: dict, i: int, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
+    """synth_narration, degrading to a silent scene when no API key is set."""
+    try:
+        return synth_narration(scene, workdir, voice_cfg)
+    except RuntimeError as e:
+        if "MISTRAL_API_KEY" in str(e):
+            print(f"[warn] {e} — rendering scene {i} without narration")
+            return None, 0.0
+        raise
+
+
+def collect_artifacts(scene: dict, theme: dict, workdir: Path, audio_path: str | None) -> dict:
+    """Per-scene inputs for pptx_export.build_pptx. Reuses cached chart PNGs
+    and scene images in the workdir; generates them only when missing."""
+    art = {}
+    if audio_path:
+        art["narration_path"] = audio_path
+    img_path = scene_image_clip(scene, theme, workdir) if scene.get("image") else None
+    if scene["type"] == "chart":
+        chart_png = chart_png_path(scene, workdir)
+        if not chart_png.exists():
+            render_chart_png(scene, theme, workdir)
+        art["chart_png"] = str(chart_png)
+    if img_path:
+        if scene.get("image", {}).get("placement", "background") in ("left", "right"):
+            art["image_png"] = img_path
+        else:
+            art["bg_image_png"] = img_path
+            scrim, _ = imggen.scrim_for_contrast(
+                img_path, theme["fg"], theme["bg"], img_opacity=scene["image"].get("opacity", 0.25))
+            art["scrim"] = scrim
+    return art
+
+
+def render_pptx_only(spec: dict, output: str, workdir: Path):
+    """Build the deck from narration, chart and image artifacts alone: no
+    clips, segments or MP4."""
+    theme = spec["theme"]
+    voice_cfg = spec.get("voice", {})
+    scene_artifacts = []
+    t_cursor = 0.0
+    for i, scene in enumerate(spec["timeline"]):
+        audio_path, audio_dur = scene_narration(scene, i, workdir, voice_cfg)
+        dur = scene_duration(scene, audio_dur)
+        scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
+        print(f"[scene {i}] {scene['type']}: {dur:.2f}s starting at {t_cursor:.2f}s"
+              + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
+        t_cursor += dur
+    _export_pptx(spec, scene_artifacts, output, strict=True)
+
+
+def render(spec_path: str, output: str, workdir: str | None = None,
+           render_video: bool = True):
     spec = load_spec(spec_path)
     theme = spec["theme"]
     voice_cfg = spec.get("voice", {})
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
+
+    if not render_video:
+        render_pptx_only(spec, output, workdir)
+        return
 
     video_clips, audios = [], []
     scene_artifacts = []
@@ -414,14 +487,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         else:
             clip = builder(scene, theme)
 
-        try:
-            audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
-        except RuntimeError as e:
-            if "MISTRAL_API_KEY" in str(e):
-                print(f"[warn] {e} — rendering scene {i} without narration")
-                audio_path, audio_dur = None, 0.0
-            else:
-                raise
+        audio_path, audio_dur = scene_narration(scene, i, workdir, voice_cfg)
 
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)
@@ -447,21 +513,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         else:
             video_clips.append(clip)
 
-        art = {}
-        if audio_path:
-            art["narration_path"] = audio_path
-        img_path = scene_image_clip(scene, theme, workdir) if scene.get("image") else None
-        if stype == "chart":
-            art["chart_png"] = str(workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png")
-        if img_path:
-            if scene.get("image", {}).get("placement", "background") in ("left", "right"):
-                art["image_png"] = img_path
-            else:
-                art["bg_image_png"] = img_path
-                scrim, _ = imggen.scrim_for_contrast(
-                    img_path, theme["fg"], theme["bg"], img_opacity=scene["image"].get("opacity", 0.25))
-                art["scrim"] = scrim
-        scene_artifacts.append(art)
+        scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
 
         print(f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
               + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
@@ -508,6 +560,8 @@ if __name__ == "__main__":
     p.add_argument("spec")
     p.add_argument("-o", "--output", default="output/video.mp4")
     p.add_argument("--workdir", default=None)
+    p.add_argument("--pptx-only", action="store_true",
+                   help="write only the .pptx (narration, images, charts); skip video encoding")
     args = p.parse_args()
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    render(args.spec, args.output, args.workdir)
+    render(args.spec, args.output, args.workdir, render_video=not args.pptx_only)

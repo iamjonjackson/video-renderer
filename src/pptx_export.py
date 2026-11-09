@@ -5,15 +5,55 @@ Built from the individual artifacts (spec, narration clips, chart PNGs,
 generated scene images) — never from the rendered video.
 """
 import json
+import wave
 from pathlib import Path
 
+from lxml import etree
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
+from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
 SLIDE_W = Inches(13.333)
 SLIDE_H = Inches(7.5)
+
+# Main-sequence "play" command, as PowerPoint writes for audio set to
+# Start: Automatically. python-pptx only emits the click-to-play media node.
+_AUTOPLAY_SEQ = (
+    '<p:seq xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+    ' concurrent="1" nextAc="seek">'
+    '<p:cTn id="2" dur="indefinite" nodeType="mainSeq"><p:childTnLst>'
+    '<p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="indefinite"/>'
+    '<p:cond evt="onBegin" delay="0"><p:tn val="2"/></p:cond></p:stCondLst><p:childTnLst>'
+    '<p:par><p:cTn id="4" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>'
+    '<p:par><p:cTn id="5" presetID="1" presetClass="mediacall" presetSubtype="0"'
+    ' fill="hold" nodeType="afterEffect"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>'
+    '<p:cmd type="call" cmd="playFrom(0.0)"><p:cBhvr>'
+    '<p:cTn id="6" dur="{dur}" fill="hold"/><p:tgtEl><p:spTgt spid="{spid}"/></p:tgtEl>'
+    '</p:cBhvr></p:cmd>'
+    '</p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par>'
+    '</p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn>'
+    '<p:prevCondLst><p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst>'
+    '<p:nextCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst>'
+    '</p:seq>'
+)
+
+
+def _wav_ms(path: str) -> int:
+    with wave.open(path) as w:
+        return max(1, round(w.getnframes() * 1000 / w.getframerate()))
+
+
+def _autoplay(slide, media_shape, audio_path: str):
+    """Start the slide's narration when the slide opens."""
+    root = slide._element.find(qn("p:timing")).find(".//" + qn("p:childTnLst"))
+    seq = etree.fromstring(_AUTOPLAY_SEQ.format(dur=_wav_ms(audio_path),
+                                                spid=media_shape.shape_id))
+    root.insert(0, seq)
+    # Keep cTn ids unique: the media node python-pptx created follows the sequence.
+    for i, ctn in enumerate(root.iter(qn("p:cTn")), start=2):
+        ctn.set("id", str(i))
 
 
 def _rgb(hex_color: str) -> RGBColor:
@@ -124,12 +164,13 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
 
         # embed narration audio on the slide
         if art.get("narration_path"):
-            slide.shapes.add_movie(
+            media = slide.shapes.add_movie(
                 art["narration_path"],
                 left=SLIDE_W - Inches(1.05), top=SLIDE_H - Inches(1.05),
                 width=Inches(0.8), height=Inches(0.8),
                 poster_frame_image=None, mime_type="audio/wav"
             )
+            _autoplay(slide, media, art["narration_path"])
 
     prs.save(output_path)
     return output_path

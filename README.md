@@ -66,6 +66,13 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
   embedded on their slides, chart PNGs, generated images). Open in
   PowerPoint, tweak, and export to video from there for a near-identical
   result.
+- **PPTX-only mode**: `python3 src/render.py spec.json -o output/deck.pptx --pptx-only`
+  skips the video path entirely (no clips, segments, ffmpeg or MP4) and
+  writes just the deck, still with narration, AI images and charts. With a
+  warm workdir cache it makes no API calls and runs in seconds. This is a
+  CLI flag only; a spec-level `"meta": {"render": "pptx"}` option is a
+  non-goal, since output format is a per-run choice and the same spec should
+  produce either.
 - **AI-generated images** (optional, any scene): add an `image` block —
 
 ```json

@@ -277,12 +277,30 @@ def build_bullets(scene, theme, workdir=None):
     b_size = int(theme["font_size"] * 0.55)
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
+    stagger = scene.get("stagger", 0.4)
     for i, item in enumerate(scene["items"]):
         bullet = _left_text_clip("• " + item, theme, b_size,
                                  max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
+        bullet = _reveal(bullet, i * stagger)
         clips.append(bullet.with_position((x, y)))
     return CompositeVideoClip(clips, size=(W, H))
+
+
+BULLET_FADE = 0.3
+
+
+def _reveal(clip, start: float, fade: float = BULLET_FADE):
+    """Make a text clip appear at `start` (scene-relative) with a fade-in.
+
+    The fade is applied to the clip's alpha mask, so the transparent text
+    box blends over the background instead of fading from black. The clip
+    keeps an open-ended duration, so a late start never makes it vanish
+    before the scene ends; the scene's own duration bounds it.
+    """
+    if clip.mask is not None:
+        clip = clip.with_mask(clip.mask.with_effects([vfx.FadeIn(fade)]))
+    return clip.with_start(start)
 
 
 def build_image(scene, theme, workdir):

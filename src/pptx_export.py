@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
 SLIDE_W = Inches(13.333)
@@ -19,6 +19,30 @@ SLIDE_H = Inches(7.5)
 def _rgb(hex_color: str) -> RGBColor:
     h = hex_color.lstrip("#")
     return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def _set_fill_alpha(shape, opacity):
+    """Set the opacity (0-1) of a shape's solid fill via the srgbClr alpha."""
+    from pptx.oxml.ns import qn
+    clr = shape.fill._xPr.find(qn("a:solidFill")).find(qn("a:srgbClr"))
+    alpha = clr.makeelement(qn("a:alpha"), {"val": str(int(opacity * 100000))})
+    clr.append(alpha)
+
+
+def _add_cover_picture(slide, path):
+    """Place an image full-bleed, scaled to cover the slide and center-cropped
+    so it keeps its aspect ratio (matches build_image's video framing)."""
+    pic = slide.shapes.add_picture(path, 0, 0, width=SLIDE_W, height=SLIDE_H)
+    img_w, img_h = pic.image.size
+    img_ratio = img_w / img_h
+    slide_ratio = SLIDE_W / SLIDE_H
+    if img_ratio > slide_ratio:      # too wide: trim left/right
+        excess = 1 - slide_ratio / img_ratio
+        pic.crop_left = pic.crop_right = excess / 2
+    elif img_ratio < slide_ratio:    # too tall: trim top/bottom
+        excess = 1 - img_ratio / slide_ratio
+        pic.crop_top = pic.crop_bottom = excess / 2
+    return pic
 
 
 def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
@@ -109,12 +133,19 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                     width=SLIDE_W - Inches(1.6),
                     height=SLIDE_H - Inches(1.6))
         elif stype == "image" and art.get("image_png"):
-            slide.shapes.add_picture(art["image_png"], 0, 0,
-                                     width=SLIDE_W, height=SLIDE_H)
+            _add_cover_picture(slide, art["image_png"])
             if scene.get("caption"):
+                # translucent bar behind the caption, as in the video
+                bar_h = int(SLIDE_H * 0.12)
+                bar = slide.shapes.add_shape(1, 0, SLIDE_H - bar_h, SLIDE_W, bar_h)
+                bar.fill.solid()
+                bar.fill.fore_color.rgb = RGBColor(0, 0, 0)
+                _set_fill_alpha(bar, 0.6)
+                bar.line.fill.background()
                 cb = slide.shapes.add_textbox(
-                    Inches(1), SLIDE_H - Inches(1.1),
-                    SLIDE_W - Inches(2), Inches(0.7))
+                    Inches(1), SLIDE_H - bar_h,
+                    SLIDE_W - Inches(2), bar_h)
+                cb.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
                 cp = cb.text_frame.paragraphs[0]
                 cp.alignment = PP_ALIGN.CENTER
                 cr = cp.add_run()

@@ -9,8 +9,10 @@ length + padding), unless an explicit `duration` overrides them.
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import matplotlib
@@ -467,41 +469,49 @@ def render(spec_path: str, output: str, workdir: str | None = None):
               + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
         t_cursor += dur
 
-    if stream:
-        # Concatenate segments with the ffmpeg concat demuxer (O(1) memory;
-        # MoviePy re-reading 31 segment files OOMs). Identical codecs/params
-        # make stream copy safe.
-        seg_files = sorted(seg_dir.glob("seg_*.mp4"))
-        concat_list = seg_dir / "concat.txt"
-        concat_list.write_text("".join("file '" + str(p.resolve()) + "'\n" for p in seg_files))
-        ffmpeg = _ffmpeg_exe()
-        cmd = [ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
-               "-i", str(concat_list), "-c", "copy", output]
-        subprocess.run(cmd, check=True)
-        # Mux narration: one pass with all audio offsets as inputs
-        if audios:
-            mixed = workdir / "narration_all.wav"
-            CompositeAudioClip(audios).write_audiofile(str(mixed), logger=None)
-            tmp = str(Path(output).with_suffix(".mux.mp4"))
-            subprocess.run([ffmpeg, "-y", "-loglevel", "error",
-                           "-i", output, "-i", str(mixed),
-                           "-c:v", "copy", "-c:a", "aac",
-                           "-map", "0:v", "-map", "1:a",
-                           "-shortest", tmp], check=True)
-            Path(tmp).replace(output)
-        print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps, streamed)")
-        _export_pptx(spec, scene_artifacts, output)
-        return
+    # Encode into a local temp dir, then move the finished file to `output` in
+    # one go. Writing the MP4 straight into a cloud-synced folder (OneDrive /
+    # macOS File Provider) can stall FFmpeg's many small writes until they time
+    # out (ETIMEDOUT), which MoviePy then reports as a BrokenPipeError.
+    tmp_dir = Path(tempfile.mkdtemp(prefix="render-"))
+    try:
+        tmp_out = str(tmp_dir / Path(output).name)
+        if stream:
+            # Concatenate segments with the ffmpeg concat demuxer (O(1) memory;
+            # MoviePy re-reading 31 segment files OOMs). Identical codecs/params
+            # make stream copy safe.
+            seg_files = sorted(seg_dir.glob("seg_*.mp4"))
+            concat_list = seg_dir / "concat.txt"
+            concat_list.write_text("".join("file '" + str(p.resolve()) + "'\n" for p in seg_files))
+            ffmpeg = _ffmpeg_exe()
+            cmd = [ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                   "-i", str(concat_list), "-c", "copy", tmp_out]
+            subprocess.run(cmd, check=True)
+            # Mux narration: one pass with all audio offsets as inputs
+            if audios:
+                mixed = tmp_dir / "narration_all.wav"
+                CompositeAudioClip(audios).write_audiofile(str(mixed), logger=None)
+                muxed = str(tmp_dir / ("mux_" + Path(output).name))
+                subprocess.run([ffmpeg, "-y", "-loglevel", "error",
+                               "-i", tmp_out, "-i", str(mixed),
+                               "-c:v", "copy", "-c:a", "aac",
+                               "-map", "0:v", "-map", "1:a",
+                               "-shortest", muxed], check=True)
+                Path(muxed).replace(tmp_out)
+        else:
+            final = concatenate_videoclips(video_clips, method="compose")
+            if audios:
+                final = final.with_audio(CompositeAudioClip(audios))
+            final.write_videofile(tmp_out, fps=fps, codec="libx264",
+                                  audio_codec="aac", logger=None,
+                                  temp_audiofile=str(tmp_dir / "temp-audio.m4a"))
+        Path(output).resolve().parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(tmp_out, output)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    final = concatenate_videoclips(video_clips, method="compose")
-    if audios:
-        final = final.with_audio(CompositeAudioClip(audios))
-    final.write_videofile(output, fps=fps, codec="libx264",
-                          audio_codec="aac", logger=None)
-    print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
-
+    print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps{', streamed' if stream else ''})")
     _export_pptx(spec, scene_artifacts, output)
-
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()

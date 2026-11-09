@@ -40,7 +40,9 @@
     },
     "timeline": {
       "type": "array",
-      "items": { "$ref": "#/definitions/scene" }
+      "minItems":1,
+      "items": { 
+        "$ref": "#/definitions/scene"}
     }
   },
   "definitions": {
@@ -63,6 +65,30 @@
     },
     "title": {
       "properties": {
+        "image": {
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "placement": {
+      "type": "string",
+      "enum": ["left", "right", "background"]
+    },
+    "style": {
+      "type": "string"
+    },
+    "opacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "additionalProperties": false
+},
         "type": { "const": "title" },
         "text": { "type": "string" },
         "subtitle": { "type": "string" },
@@ -78,6 +104,30 @@
       "properties": {
         "type": { "const": "bullets" },
         "heading": { "type": "string" },
+        "image": {
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "placement": {
+      "type": "string",
+      "enum": ["left", "right"]
+    },
+    "style": {
+      "type": "string"
+    },
+    "opacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "additionalProperties": false
+},
         "items": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "stagger": { "type": "number", "default": 0.4, "description": "Seconds between bullet reveals" },
         "narration": { "type": "string" },

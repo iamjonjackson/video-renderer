@@ -1,0 +1,12 @@
+{
+  "timeline": [
+    {
+      "type": "title",
+      "duration": "five"
+    },
+    {
+      "type": "bullet",
+      "items": ["Hello"]
+    }
+  ]
+}

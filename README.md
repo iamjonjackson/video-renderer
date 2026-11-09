@@ -19,7 +19,7 @@ MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
 git clone https://github.com/iamjonjackson/video-renderer.git
 cd video-renderer
 python3 -m venv .venv && source .venv/bin/activate
-pip install moviepy matplotlib imageio-ffmpeg pillow
+pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx
 
 cp .env.example .env     # then edit .env and add your MISTRAL_API_KEY
 set -a; source .env; set +a   # load env vars (or use dotenv in your shell)
@@ -27,6 +27,26 @@ set -a; source .env; set +a   # load env vars (or use dotenv in your shell)
 # Final videos go to ./output, intermediate render files to ./temp
 python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 ```
+
+### PowerPoint only
+
+```bash
+python3 src/render.py samples/sample-spec.json -o output/deck.pptx --pptx-only
+```
+
+`--pptx-only` builds the slides with their narration audio, images, charts,
+and theme, without building video clips or encoding an MP4. Scene durations
+and narration start times still appear in the log. The output suffix is
+always `.pptx` in this mode; without `-o`, the deck is `output/video.pptx`.
+
+Narration and generated images reuse the existing workdir cache. Charts
+also reuse their PNGs in this mode, so unchanged scenes need no API calls
+on a second run. Use `--workdir` to choose the cache directory. Missing API
+credentials still skip uncached narration and AI images with a warning.
+Deck export errors fail the command rather than reporting a successful render.
+
+The CLI flag is the supported switch; a spec-level `meta.render` option is
+outside this change. Omitting the flag keeps the existing MP4 and PPTX path.
 
 Notes:
 - `.env` is gitignored; `.env.example` documents the variables.
@@ -116,6 +136,12 @@ Students: request a key from your hackathon organiser.
    **Limits** page in the console for your current allowances
 
 ## Contributing
+
+Run the export checks without API credentials:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 Work happens on a branch in your fork **first**; the PR comes last.
 

@@ -64,8 +64,13 @@ def load_spec(path: str) -> dict:
     return spec
 
 
-def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
-    """Synthesize narration if present; return (audio_path, duration)."""
+def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float, list[dict]]:
+    """Synthesize narration if present.
+
+    Returns (audio_path, duration, segments) where segments is
+    [{"text", "start", "duration"}] with start relative to the scene,
+    one per TTS clip (used for subtitle timing).
+    """
     texts = []
     per_bullet = scene.get("narration_per_bullet")
     if per_bullet:
@@ -73,7 +78,7 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
     elif scene.get("narration"):
         texts = [scene["narration"]]
     if not texts:
-        return None, 0.0
+        return None, 0.0, []
     paths = []
     for i, text in enumerate(texts):
         h = hashlib.sha1(text.encode()).hexdigest()[:10]
@@ -86,13 +91,18 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
                 fmt=voice_cfg.get("format", "wav"),
             )
         paths.append(str(out))
+    segments, offset = [], 0.0
+    for text, path in zip(texts, paths):
+        d = tts.audio_duration(path)
+        segments.append({"text": text, "start": offset, "duration": d})
+        offset += d
     if len(paths) == 1:
-        return paths[0], tts.audio_duration(paths[0])
+        return paths[0], segments[0]["duration"], segments
     combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
     if not combined.exists():
         merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
         merged.write_audiofile(str(combined), logger=None)
-    return str(combined), tts.audio_duration(str(combined))
+    return str(combined), tts.audio_duration(str(combined)), segments
 
 
 def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float:
@@ -251,7 +261,23 @@ def _wrap_to_width(text: str, size: int, font: str, max_w_px: int,
     return "\n".join(lines[:max_lines])
 
 
-def build_bullets(scene, theme, workdir=None):
+def bullet_reveal_times(scene: dict, segments: list[dict]) -> list[float] | None:
+    """Per-bullet reveal times from narration_per_bullet audio offsets.
+
+    Returns one scene-relative start per bullet (the cumulative offset of
+    its narration clip), or None to fall back to the flat `stagger`
+    interval: single `narration`, silent scenes, or a count mismatch.
+    """
+    if not scene.get("narration_per_bullet") or not segments:
+        return None
+    if len(segments) != len(scene.get("items", [])):
+        print(f"[warn] narration_per_bullet has {len(segments)} clips for "
+              f"{len(scene.get('items', []))} bullets; using stagger timing")
+        return None
+    return [seg["start"] for seg in segments]
+
+
+def build_bullets(scene, theme, workdir=None, reveal_times=None):
     bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
     clips = [bg]
     text_x_frac = 0.5
@@ -282,7 +308,8 @@ def build_bullets(scene, theme, workdir=None):
         bullet = _left_text_clip("• " + item, theme, b_size,
                                  max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
-        bullet = _reveal(bullet, i * stagger)
+        start = reveal_times[i] if reveal_times else i * stagger
+        bullet = _reveal(bullet, start)
         clips.append(bullet.with_position((x, y)))
     return CompositeVideoClip(clips, size=(W, H))
 
@@ -427,19 +454,23 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     for i, scene in enumerate(spec["timeline"]):
         stype = scene["type"]
         builder = BUILDERS[stype]
-        if stype in ("image", "chart", "title", "bullets"):
-            clip = builder(scene, theme, workdir)
-        else:
-            clip = builder(scene, theme)
 
         try:
-            audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
+            audio_path, audio_dur, segments = synth_narration(scene, workdir, voice_cfg)
         except RuntimeError as e:
             if "MISTRAL_API_KEY" in str(e):
                 print(f"[warn] {e} — rendering scene {i} without narration")
-                audio_path, audio_dur = None, 0.0
+                audio_path, audio_dur, segments = None, 0.0, []
             else:
                 raise
+
+        if stype == "bullets":
+            clip = builder(scene, theme, workdir,
+                           reveal_times=bullet_reveal_times(scene, segments))
+        elif stype in ("image", "chart", "title"):
+            clip = builder(scene, theme, workdir)
+        else:
+            clip = builder(scene, theme)
 
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)

@@ -64,6 +64,8 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
 - **Bullet builds**: bullets appear one by one with a 0.3s fade, each
   `stagger` seconds (default 0.4) after the previous; the heading shows
   immediately.
+  With `narration_per_bullet` (one TTS clip per bullet), each bullet
+  instead appears exactly when its own narration clip starts.
 - **PPTX export**: every render also emits a `.pptx` alongside the MP4 —
   one slide per scene, built from the same artifacts (narration WAVs
   embedded on their slides, chart PNGs, generated images). Open in

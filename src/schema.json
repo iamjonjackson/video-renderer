@@ -38,6 +38,24 @@
         "format": { "type": "string", "enum": ["mp3", "wav"], "default": "mp3" }
       }
     },
+    "branding": {
+      "type": "object",
+      "required": ["logo"],
+      "properties": {
+        "logo": { "type": "string", "description": "Path to a logo image (PNG with alpha recommended), relative to the spec file" },
+        "position": { "type": "string", "enum": ["top-left", "top-right", "bottom-left", "bottom-right"], "default": "bottom-right" },
+        "margin": { "type": "integer", "minimum": 0, "default": 40, "description": "Pixels between logo and frame edges" },
+        "max_height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.10, "description": "Logo height as a fraction of frame height" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1.0 },
+        "scenes": {
+          "oneOf": [
+            { "const": "all" },
+            { "type": "array", "items": { "enum": ["title", "bullets", "chart", "image", "outro"] } }
+          ],
+          "default": "all"
+        }
+      }
+    },
     "timeline": {
       "type": "array",
       "items": { "$ref": "#/definitions/scene" }

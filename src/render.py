@@ -349,6 +349,35 @@ def build_outro(scene, theme):
     return CompositeVideoClip([bg, txt], size=(W, H))
 
 
+BRAND_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+
+def branding_applies(branding: dict | None, stype: str) -> bool:
+    if not branding:
+        return False
+    scenes = branding.get("scenes", "all")
+    return scenes == "all" or stype in scenes
+
+
+def branding_clip(branding: dict, spec_dir: Path):
+    """Logo overlay: alpha-respecting PNG scaled to a max height, placed at a
+    corner with a margin so it never touches the frame border."""
+    pos = branding.get("position", "bottom-right")
+    if pos not in BRAND_POSITIONS:
+        raise ValueError(f"branding.position must be one of {BRAND_POSITIONS}, got {pos!r}")
+    logo = Path(branding["logo"])
+    if not logo.is_absolute():
+        logo = spec_dir / logo
+    margin = int(branding.get("margin", 40))
+    max_h = int(H * branding.get("max_height", 0.10))
+    clip = ImageClip(str(logo))  # RGBA PNG -> alpha mask is kept
+    if clip.h != max_h:
+        clip = clip.resized(height=max_h)
+    x = margin if pos.endswith("left") else W - clip.w - margin
+    y = margin if pos.startswith("top") else H - clip.h - margin
+    return clip.with_position((x, y)).with_opacity(branding.get("opacity", 1.0))
+
+
 BUILDERS = {
     "title": build_title,
     "bullets": build_bullets,
@@ -397,6 +426,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
 
+    branding = spec.get("branding")
     video_clips, audios = [], []
     scene_artifacts = []
     t_cursor = 0.0
@@ -433,6 +463,11 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         if scene.get("anim") in ("zoom-in", "kenburns"):
             clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
                 .with_duration(dur)
+
+        if branding_applies(branding, stype):
+            clip = CompositeVideoClip(
+                [clip, branding_clip(branding, Path(spec_path).parent).with_duration(dur)],
+                size=(W, H)).with_duration(dur)
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))

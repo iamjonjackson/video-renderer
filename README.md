@@ -19,7 +19,7 @@ MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
 git clone https://github.com/iamjonjackson/video-renderer.git
 cd video-renderer
 python3 -m venv .venv && source .venv/bin/activate
-pip install moviepy matplotlib imageio-ffmpeg pillow
+pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx
 
 cp .env.example .env     # then edit .env and add your MISTRAL_API_KEY
 set -a; source .env; set +a   # load env vars (or use dotenv in your shell)
@@ -29,12 +29,64 @@ python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 ```
 
 Notes:
+
 - `.env` is gitignored; `.env.example` documents the variables.
 - `output/` (final videos) and `temp/` (TTS/image caches, intermediate
   artifacts) are gitignored except their `.gitkeep` placeholders.
 - Without `MISTRAL_API_KEY`, scenes render silently and AI image blocks are
   skipped with a warning — the pipeline never hard-fails on missing AI.
 - System ffmpeg is used if installed; otherwise `imageio-ffmpeg` bundles one.
+
+## Frame: local visual Studio
+
+Studio adds a Material-inspired storyboard editor without changing the CLI.
+Use Python 3.12 with the dependencies above, then run:
+
+```bash
+source .venv/bin/activate
+python src/studio.py
+```
+
+Open **<http://127.0.0.1:8765>** or **<http://localhost:8765>** on the
+computer running Studio. Browser-saved projects are separate for each address.
+Use `--port 8766` if that port is occupied. Studio is local-only, not a
+production server or a hosted collaboration service.
+
+- Edit title, bullet, chart and outro scenes; add, delete and reorder them.
+- Choose scenes in the single storyboard list. The header's appearance button
+  switches the interface between light and dark with a circular reveal; the
+  preference is saved separately from video styling. Reduced-motion preferences
+  and browsers without View Transitions use an immediate switch.
+- Change the video background/accent, import/export JSON, and restore the last
+  project from this browser's local storage. Export JSON before replacing a
+  project or clearing browser storage; imports replace the current project.
+- The canvas is an **approximate layout preview**, not a live MoviePy render.
+  Long text may clip in the final video; inspect the rendered result. Line/pie
+  charts are represented by a labelled data preview, not an exact chart.
+- Render an actual **silent MP4 and PPTX** with download links. Narration stays
+  in authored/exported JSON but is removed from the render copy. Inherited
+  provider credentials are excluded; Studio makes no AI calls. Timing uses
+  explicit scene durations, unlike narration-driven CLI renders.
+- Up to 12 scenes, 60 seconds total, 1–15 seconds per scene, fixed 1080p,
+  24/30 fps. Image scenes/AI image blocks and unsupported fields are rejected;
+  use the CLI for those features. The upstream sample includes an AI image
+  block, so it is not directly importable into this bounded editor.
+- One render at a time, three-minute deadline and ten renders per server
+  session. Outputs use private temporary directories, removed on shutdown;
+  download them before stopping Studio. Refreshing reconnects to the latest
+  job. A failed PPTX export is reported separately from a successful video.
+
+UI typography uses the operating system's sans-serif font (including Apple's
+system font on macOS) without redistributing SF Compact. Final video rendering
+continues to use the CLI's DejaVu Sans. No web-font CDN or frontend build is
+needed. The existing CLI and AI integrations are unchanged.
+
+Run the Studio checks:
+
+```bash
+python -m unittest discover -s tests -v
+node --check studio/app.js
+```
 
 ### GitHub Actions
 
@@ -84,6 +136,7 @@ AA (≥ 4.5:1) is met. If the target can't be reached even at maximum scrim,
 the render continues with a warning (best-effort) — it never aborts.
 `left`/`right` placements keep text on the solid theme background (contrast
 by construction) with the image in a bordered panel.
+
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
   `padding` (default 1.0s) adds a guaranteed tail buffer after narration.
 - **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a

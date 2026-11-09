@@ -1,10 +1,13 @@
 import os
 import json
-import os
+import importlib
+import io
+import tempfile
+import wave
 import base64
 from pathlib import Path
 from urllib import request as _rq
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 API_URL = "https://api.mistral.ai/v1/audio/speech"
 VOICES_URL = "https://api.mistral.ai/v1/audio/voices"
@@ -12,13 +15,102 @@ VOICES_URL = "https://api.mistral.ai/v1/audio/voices"
 _default_voice_cache: str | None = None
 
 
-def get_api_key() -> str:
-    key = os.environ.get("MISTRAL_API_KEY")
+class TTSError(RuntimeError):
+    """narration is unavailable but the scene can still render"""
+
+
+def get_provider(provider=None):
+    name = (provider if provider is not None else os.environ.get("TTS_PROVIDER", "mistral")).strip().lower()
+    if name not in ("mistral", "google", "elevenlabs"):
+        raise TTSError(f"Unknown TTS provider '{name}'; use mistral, google or elevenlabs")
+    return name
+
+
+def provider_request(req, provider, as_json=False, timeout=300):
+    # keep provider failures separate from errors in the rest of the renderer
+    try:
+        with _rq.urlopen(req, timeout=timeout) as response:
+            data = response.read()
+        return json.loads(data) if as_json else data
+    except HTTPError as error:
+        with error:
+            try:
+                detail = error.read().decode(errors="replace")[:500]
+            except OSError:
+                detail = "could not read the error response"
+        # api responses can echo credentials, so keep them out of render logs
+        for name in ("MISTRAL_API_KEY", "GOOGLE_API_KEY", "ELEVENLABS_API_KEY"):
+            key = os.environ.get(name)
+            if key:
+                detail = detail.replace(key, "[redacted]")
+        raise TTSError(f"{provider} TTS API error {error.code}: {detail}") from None
+    except (URLError, OSError, ValueError) as error:
+        raise TTSError(f"{provider} TTS request failed ({type(error).__name__})") from None
+
+
+def pcm_wav(pcm, rate=24000, channels=1):
+    # raw pcm needs a wav header before audio players can read it
+    if rate <= 0 or channels <= 0 or not pcm or len(pcm) % (2 * channels):
+        raise TTSError("TTS returned empty or incomplete PCM audio")
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as audio:
+        audio.setnchannels(channels)
+        audio.setsampwidth(2)
+        audio.setframerate(rate)
+        audio.writeframes(pcm)
+    return buffer.getvalue()
+
+
+def resolve_options(provider=None, voice_slug=None, voice_id=None, model=None, fmt=None, style=None):
+    provider = get_provider(provider)
+    if provider == "mistral":
+        default_model, default_voice, default_format = "voxtral-mini-tts-2603", FALLBACK_VOICE_SLUGS[0], "wav"
+    else:
+        adapter = importlib.import_module(f"tts_{provider}")
+        default_model, default_voice, default_format = adapter.DEFAULT_MODEL, adapter.DEFAULT_VOICE, adapter.DEFAULT_FORMAT
+    if provider == "elevenlabs":
+        voice_id = voice_id or os.environ.get("ELEVENLABS_VOICE_ID") or adapter.default_voice()
+        voice_slug = None
+    else:
+        voice_slug = voice_slug or default_voice
+    if provider == "google":
+        style = style if style is not None else adapter.DEFAULT_STYLE
+    else:
+        style = None
+    fmt = fmt or default_format
+    if fmt not in (("wav",) if provider == "google" else ("wav", "mp3")):
+        raise TTSError(f"{provider} does not support narration format '{fmt}'")
+    return dict(provider=provider, voice_slug=voice_slug, voice_id=voice_id,
+                model=model or default_model, fmt=fmt, style=style)
+
+
+def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
+                  voice_id: str | None = None, model: str | None = None,
+                  fmt: str | None = None, *, provider=None, style=None) -> str:
+    """send narration to the selected provider and return the audio path"""
+    options = resolve_options(provider, voice_slug, voice_id, model, fmt, style)
+    provider = options.pop("provider")
+    synth = _synth_mistral if provider == "mistral" else importlib.import_module(f"tts_{provider}").synth_to_file
+    target = Path(out_path)
+    # only replace the cache file after the audio has been written and decoded
+    with tempfile.TemporaryDirectory(prefix=".tts-", dir=target.parent) as tmp:
+        staged = Path(tmp) / ("narration." + options["fmt"])
+        try:
+            synth(text, str(staged), **options)
+            if audio_duration(str(staged)) <= 0:
+                raise TTSError(f"{provider} returned empty audio")
+        except TTSError:
+            raise
+        except (RuntimeError, ValueError, KeyError, IndexError, TypeError, AttributeError, wave.Error) as error:
+            raise TTSError(f"{provider} TTS returned an invalid response ({type(error).__name__})") from None
+        staged.replace(target)
+    return str(out_path)
+
+
+def get_api_key(name="MISTRAL_API_KEY") -> str:
+    key = os.environ.get(name)
     if not key:
-        raise RuntimeError(
-            "MISTRAL_API_KEY not set. Provide it via environment (e.g. from a "
-            "Drive file read into the env at render time); never paste it in chat."
-        )
+        raise TTSError(f"{name} not set; provide it via the environment")
     return key
 
 
@@ -43,12 +135,7 @@ def default_voice() -> str:
         headers={"Authorization": f"Bearer {get_api_key()}", "Accept": "application/json"},
         method="GET",
     )
-    try:
-        with _rq.urlopen(req, timeout=60) as resp:
-            body = json.loads(resp.read())
-    except HTTPError as e:
-        detail = e.read().decode(errors="replace")[:300]
-        raise RuntimeError(f"voices list HTTP {e.code}: {detail}") from e
+    body = provider_request(req, "Mistral", as_json=True, timeout=60)
     voices = None
     if isinstance(body, list):
         voices = body
@@ -95,17 +182,12 @@ def _speech(payload: dict) -> dict:
         },
         method="POST",
     )
-    try:
-        with _rq.urlopen(req, timeout=300) as resp:
-            return json.loads(resp.read())
-    except HTTPError as e:
-        detail = e.read().decode(errors="replace")[:500]
-        raise RuntimeError(f"Mistral TTS API error {e.code}: {detail}") from e
+    return provider_request(req, "Mistral", as_json=True)
 
 
-def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
+def _synth_mistral(text: str, out_path: str, voice_slug: str | None = None,
                   voice_id: str | None = None, model: str = "voxtral-mini-tts-2603",
-                  fmt: str = "wav") -> str:
+                  fmt: str = "wav", style=None) -> str:
     """Synthesize one narration clip via the Mistral TTS REST API; return its path."""
     payload: dict = {"model": model, "input": text, "response_format": fmt}
     tried = []
@@ -148,30 +230,7 @@ def synth_to_file(text: str, out_path: str, voice_slug: str | None = None,
     audio_b64 = body.get("audio_data") or body.get("audio")
     if not audio_b64:
         raise RuntimeError(f"Unexpected TTS response keys: {list(body)}")
-    Path(out_path).write_bytes(base64.b64decode(audio_b64))
-    return str(out_path)
-
-    req = _rq.Request(
-        API_URL,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {get_api_key()}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with _rq.urlopen(req, timeout=300) as resp:
-            body = json.loads(resp.read())
-    except HTTPError as e:
-        detail = e.read().decode(errors="replace")[:500]
-        raise RuntimeError(f"Mistral TTS API error {e.code}: {detail}") from e
-
-    audio_b64 = body.get("audio_data") or body.get("audio")
-    if not audio_b64:
-        raise RuntimeError(f"Unexpected TTS response keys: {list(body)}")
-    Path(out_path).write_bytes(base64.b64decode(audio_b64))
+    Path(out_path).write_bytes(base64.b64decode(audio_b64, validate=True))
     return str(out_path)
 
 
@@ -184,5 +243,8 @@ def audio_duration(path: str) -> float:
     exactly.
     """
     from moviepy import AudioFileClip
-    with AudioFileClip(path) as clip:
-        return float(clip.duration)
+    try:
+        with AudioFileClip(path) as clip:
+            return float(clip.duration)
+    except (OSError, ValueError) as error:
+        raise TTSError(f"TTS audio could not be decoded ({type(error).__name__})") from None

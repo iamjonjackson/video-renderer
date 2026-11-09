@@ -128,7 +128,9 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 art["narration_path"],
                 left=SLIDE_W - Inches(1.05), top=SLIDE_H - Inches(1.05),
                 width=Inches(0.8), height=Inches(0.8),
-                poster_frame_image=None, mime_type="audio/wav"
+                # mp3 narration needs the matching media type in powerpoint
+                poster_frame_image=None,
+                mime_type="audio/mpeg" if Path(art["narration_path"]).suffix.lower() == ".mp3" else "audio/wav"
             )
 
     prs.save(output_path)

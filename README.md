@@ -19,7 +19,7 @@ MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
 git clone https://github.com/iamjonjackson/video-renderer.git
 cd video-renderer
 python3 -m venv .venv && source .venv/bin/activate
-pip install moviepy matplotlib imageio-ffmpeg pillow
+pip install -r requirements.txt
 
 cp .env.example .env     # then edit .env and add your MISTRAL_API_KEY
 set -a; source .env; set +a   # load env vars (or use dotenv in your shell)

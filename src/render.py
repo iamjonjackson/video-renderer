@@ -371,6 +371,62 @@ def apply_anim(clip, anim: str, duration: float):
     return clip
 
 
+BRANDING_DEFAULTS = {"position": "bottom-right", "margin": 40, "opacity": 0.85,
+                     "max_height": 0.10, "scenes": "all"}
+CORNERS = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+
+def load_branding(spec: dict, spec_path: str) -> dict | None:
+    """Prepare the optional logo watermark once; None when absent or unusable."""
+    cfg = spec.get("branding")
+    if not cfg:
+        return None
+    cfg = {**BRANDING_DEFAULTS, **cfg}
+    if not cfg.get("logo"):
+        print("[warn] 'branding' block missing 'logo'; rendering without branding")
+        return None
+    from PIL import Image
+    import numpy as np
+    # Relative logo paths resolve against the spec's folder first, then the
+    # current directory (like image `src`).
+    logo_path = Path(cfg["logo"])
+    if not logo_path.is_absolute() and (Path(spec_path).parent / logo_path).exists():
+        logo_path = Path(spec_path).parent / logo_path
+    try:
+        img = Image.open(logo_path).convert("RGBA")
+    except OSError as e:
+        print(f"[warn] branding logo unreadable ({e}); rendering without branding")
+        return None
+    pos = cfg["position"]
+    if pos not in CORNERS:
+        print(f"[warn] unknown branding position {pos!r}; using bottom-right")
+        pos = "bottom-right"
+    # Scale to max_height (fraction of H), never wider than the frame allows,
+    # and keep at least 1px between the logo and the frame border.
+    margin = max(int(cfg["margin"]), 1)
+    scale = min(H * cfg["max_height"] / img.height, (W - 2 * margin) / img.width)
+    img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))),
+                     Image.LANCZOS)
+    x = margin if pos.endswith("left") else W - margin - img.width
+    y = margin if pos.startswith("top") else H - margin - img.height
+    # ImageClip turns the PNG alpha into a mask; with_opacity scales that mask.
+    logo = ImageClip(np.array(img)).with_opacity(cfg["opacity"]).with_position((x, y))
+    return {"clip": logo, "scenes": cfg["scenes"]}
+
+
+def apply_branding(clip, scene: dict, branding: dict, dur: float):
+    """Overlay the logo on a scene after its animation, so the logo holds
+    steady (no fade, zoom or slide) while the scene underneath animates."""
+    scenes = branding["scenes"]
+    if scenes != "all" and scene["type"] not in scenes:
+        return clip
+    # "center" matches concatenate_videoclips(method="compose"), which
+    # re-centres every scene, so the scene under the logo looks unchanged.
+    return CompositeVideoClip([clip.with_position("center"),
+                               branding["clip"].with_duration(dur)],
+                              size=(W, H)).with_duration(dur)
+
+
 def _ffmpeg_exe() -> str:
     from shutil import which
     p = which("ffmpeg")
@@ -396,6 +452,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     voice_cfg = spec.get("voice", {})
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
+    branding = load_branding(spec, spec_path)
 
     video_clips, audios = [], []
     scene_artifacts = []
@@ -433,6 +490,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         if scene.get("anim") in ("zoom-in", "kenburns"):
             clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
                 .with_duration(dur)
+        if branding:
+            clip = apply_branding(clip, scene, branding, dur)
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))

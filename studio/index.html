@@ -11,11 +11,16 @@
     <script src="/thumbnails.js" defer></script>
     <script src="/scene-menus.js" defer></script>
     <script src="/canvas-icons.js" defer></script>
+    <script src="/rich-elements.js" defer></script>
     <script src="/canvas.js" defer></script>
     <script src="/canvas-assets.js" defer></script>
     <script src="/canvas-motion.js" defer></script>
     <script src="/project-playback.js" defer></script>
     <script src="/authoring.js" defer></script>
+    <script src="/hosted-generation.js" defer></script>
+    <script src="/history.js" defer></script>
+    <script src="/timeline-editor.js" defer></script>
+    <script src="/shot-regeneration.js" defer></script>
   </head>
   <body>
     <a class="skip" id="skip-link" href="#editor">Skip to editor</a>
@@ -140,7 +145,10 @@
               <div class="tool-group" aria-label="Add element">
                 <button class="button outlined" id="add-text">Text</button
                 ><button class="button outlined" id="add-chart">Chart</button
+                ><button class="button outlined" id="undo-project">Undo</button
+                ><button class="button outlined" id="redo-project">Redo</button
                 ><button class="button outlined" id="add-icon">Icon</button
+                ><button class="button outlined" id="add-path">Path</button
                 ><button class="button outlined" id="add-image">Image</button
                 ><input
                   id="image-file"
@@ -217,6 +225,8 @@
                     </option>
                     <option value="chart-draw">Draw chart / fill slices</option>
                     <option value="words">Word-by-word reveal</option>
+                    <option value="chunks">Semantic text chunks</option>
+                    <option value="path-draw">Draw path</option>
                     <option value="wipe">Wipe / chart reveal</option>
                   </select></label
                 ><label
@@ -428,7 +438,28 @@
                 Save changes
               </button>
             </section>
-            <div class="motion-transport" aria-label="Scene animation preview">
+            <div class="project-transport" aria-label="Full project playback">
+              <button id="project-play" class="button outlined">
+                Play project</button
+              ><button id="project-restart" class="button subtle">
+                Restart</button
+              ><button id="project-stop" class="button subtle">
+                Back to editing</button
+              ><select id="project-speed" aria-label="Preview speed">
+                <option value="1">1×</option>
+                <option value="0.5">0.5×</option>
+                <option value="2">2×</option></select
+              ><input
+                id="project-time"
+                type="range"
+                aria-label="Project time"
+                min="0"
+                max="60"
+                step="0.01"
+                value="0"
+              /><output id="project-clock">Full storyboard preview</output>
+            </div>
+            <details class="scene-workbench" id="scene-workbench"><summary>Scene animation &amp; advanced editing</summary><div class="scene-workbench-body">            <div class="motion-transport" aria-label="Scene animation preview">
               <select
                 id="scene-motion-preset"
                 aria-label="Scene animation preset"
@@ -464,6 +495,67 @@
                 Resting layout
               </button>
             </div>
+            <button id="regenerate-shot" class="button subtle">
+              Regenerate shot (hosted)
+            </button>
+            <p id="shot-status" role="status"></p>
+            <section
+              id="shot-panel"
+              popover
+              aria-label="Replacement shot"
+              class="scene-menu"
+            >
+              <h2>Review replacement shot</h2>
+              <textarea
+                id="shot-json"
+                rows="12"
+                readonly
+                aria-label="Replacement shot JSON"
+              ></textarea
+              ><button id="shot-apply" class="button primary" disabled>
+                Apply replacement</button
+              ><button
+                class="button subtle"
+                popovertarget="shot-panel"
+                popovertargetaction="hide"
+              >
+                Close
+              </button>
+            </section>
+            <button id="track-open" class="button subtle">
+              Advanced tracks
+            </button>
+            <section
+              id="track-panel"
+              popover
+              aria-label="Editable timeline tracks"
+              class="scene-menu"
+            >
+              <h2>Timeline / selected element</h2>
+              <p>
+                Scene-local seconds; keyframe x/y are offsets. Groups share a
+                bounding-box pivot. Path points are 0–1.
+              </p>
+              <textarea
+                id="track-json"
+                rows="14"
+                aria-label="Timeline track JSON"
+              ></textarea>
+              <p id="track-error" role="alert"></p>
+              <button id="track-save" class="button primary">
+                Validate and apply</button
+              ><button
+                class="button subtle"
+                popovertarget="track-panel"
+                popovertargetaction="hide"
+              >
+                Close
+              </button>
+            </section>
+            <button id="quality-check" class="button subtle">
+              Check composition
+            </button>
+            <pre id="quality-result" role="status"></pre>
             <section
               id="timing-panel"
               popover
@@ -486,27 +578,7 @@
               </p>
               <div id="timing-tracks"></div>
             </section>
-            <div class="project-transport" aria-label="Full project playback">
-              <button id="project-play" class="button outlined">
-                Play project</button
-              ><button id="project-restart" class="button subtle">
-                Restart</button
-              ><button id="project-stop" class="button subtle">
-                Back to editing</button
-              ><select id="project-speed" aria-label="Preview speed">
-                <option value="1">1×</option>
-                <option value="0.5">0.5×</option>
-                <option value="2">2×</option></select
-              ><input
-                id="project-time"
-                type="range"
-                aria-label="Project time"
-                min="0"
-                max="60"
-                step="0.01"
-                value="0"
-              /><output id="project-clock">Full storyboard preview</output>
-            </div>
+</div></details>
             <div class="preview-caption">
               <span id="preview-name">Scene 01 · Title</span
               ><span id="canvas-help"
@@ -532,6 +604,13 @@
                   <option value="video-only">Video only</option>
                 </select>
               </div>
+              <details class="narration-options"><summary>Narration options</summary>              <label
+                ><input id="render-narrated" type="checkbox" /> Narrate using
+                server-configured provider (up to 12 charged requests;
+                transcript sent externally)</label
+              >
+              <p id="narration-identity" class="field-hint"></p>
+</details>
               <button id="render" class="button primary">
                 Render project <span aria-hidden="true">↗</span>
               </button>
@@ -572,6 +651,40 @@
           Start with a detailed example or describe your own story. Generate
           editable slides, review the content, then apply them to your project.
         </p>
+        <fieldset>
+          <legend>Generation engine</legend>
+          <label
+            >Mode<select id="generation-mode">
+              <option value="local">Local · offline</option>
+              <option value="hosted">Hosted · server-configured API</option>
+            </select></label
+          >
+          <div id="hosted-controls" hidden>
+            <label
+              >Provider / model<select id="generation-provider"></select
+            ></label>
+            <p id="generation-readiness" role="status"></p>
+            <label
+              ><input id="cloud-consent" type="checkbox" /> Send this brief to
+              the selected provider; API charges and provider data terms
+              apply.</label
+            ><label
+              ><input id="cloud-images" type="checkbox" /> Generate one concept
+              image · one extra call</label
+            ><label
+              ><input id="cloud-critique" type="checkbox" /> Send up to three
+              rendered frames for advisory vision critique · one extra
+              call</label
+            ><label
+              ><input id="cloud-repair" type="checkbox" /> Permit one repair
+              after critique · at most one extra call</label
+            >
+            <p>
+              2–5 calls maximum per job. Cancelling cannot refund a submitted
+              request. No automatic fallback or unbounded retries.
+            </p>
+          </div>
+        </fieldset>
         <label for="template">Presentation goal</label
         ><select id="template">
           <option value="explainer">Clear explainer</option>

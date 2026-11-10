@@ -691,6 +691,136 @@ class RevealTests(unittest.TestCase):
             clip.close()
 
 
+class ChunkAndSeriesTests(unittest.TestCase):
+    @staticmethod
+    def scene():
+        scene = entrance_scene("chunks")
+        scene["duration"] = 4
+        item = scene["elements"][0]
+        item.pop("shape")
+        item.update(type="text", text="AB  ÉF\nZ", font_size=0.08, chunks=[
+            {"text": "AB  ", "start": 0.5, "duration": 1},
+            {"text": "ÉF\nZ", "start": 2, "duration": 1},
+        ])
+        return scene
+
+    def test_chunk_source_prefix_timing_ignores_enclosing_progress(self):
+        scene = validate_motion_scene(self.scene())
+        item = scene["elements"][0]
+        item["animation"].update(start=0, duration=0.1, easing="linear")
+        for time, count in ((-1, 0), (0.5, 0), (1, 3), (1.5, 4),
+                            (2, 4), (2.5, 7), (3, 8), (20, 8), (1, 3)):
+            self.assertEqual(composition.chunk_visible_characters(item, time), count)
+            self.assertEqual(composition.motion_state(item, time),
+                             {"opacity": 1, "dx": 0, "dy": 0, "scale": 1})
+            self.assertEqual(composition.reveal_progress(item, time), 1)
+
+    def test_chunk_contract_rejects_loss_overlap_invalid_timing_and_exit(self):
+        mutations = [
+            lambda s: s.pop("motion_version"),
+            lambda s: s["elements"][0].pop("chunks"),
+            lambda s: s["elements"][0].update(chunks=[]),
+            lambda s: s["elements"][0].update(chunks=s["elements"][0]["chunks"] * 9),
+            lambda s: s["elements"][0]["chunks"][0].update(text="AB"),
+            lambda s: s["elements"][0]["chunks"][0].update(text=""),
+            lambda s: s["elements"][0]["chunks"][0].update(extra=1),
+            lambda s: s["elements"][0]["chunks"][1].update(start=1.4),
+            lambda s: s["elements"][0]["chunks"][1].update(start=3.1),
+            lambda s: s["elements"][0]["animation"].update(effect="characters"),
+            lambda s: s["elements"][0].update(exit_animation={
+                "effect": "chunks", "start": 3, "duration": 1, "easing": "linear"}),
+            lambda s: s["elements"][0].update(exit_animation={
+                "effect": "fade", "start": 2.9, "duration": 1, "easing": "linear"}),
+        ]
+        for mutation in mutations:
+            scene = self.scene()
+            mutation(scene)
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                validate_motion_scene(scene)
+        for key, values in (("start", [-1, True, float("nan"), float("inf")]),
+                            ("duration", [0.09, 3.01, True, float("nan")])):
+            for value in values:
+                scene = self.scene()
+                scene["elements"][0]["chunks"][0][key] = value
+                with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                    validate_motion_scene(scene)
+        scene = self.scene()
+        scene["elements"][0]["chunks"][1]["start"] = 1.5
+        validate_motion_scene(scene)  # Touching endpoints are nonoverlapping.
+
+    def test_chunk_frames_keep_full_layout_and_are_stateless(self):
+        import numpy as np
+
+        for align in ("left", "center", "right"):
+            scene = self.scene()
+            item = scene["elements"][0]
+            item.update(align=align, w=0.2)
+            validate_motion_scene(scene)
+            clip = composition.build_clip(scene, 400, 240)
+            full_item = copy.deepcopy(item)
+            full_item.pop("animation")
+            full_item.pop("chunks")
+            static = copy.deepcopy(scene)
+            static["elements"] = [full_item]
+            resting = composition.build_clip(static, 400, 240)
+            try:
+                final = resting.get_frame(0)
+                self.assertFalse(clip.get_frame(0).any())
+                middle = clip.get_frame(2.5).copy()
+                self.assertTrue(middle.any())
+                mask = middle.any(axis=2)
+                self.assertTrue(np.array_equal(middle[mask], final[mask]))
+                self.assertTrue(np.array_equal(clip.get_frame(3), final))
+                self.assertTrue(np.array_equal(clip.get_frame(20), final))
+                self.assertTrue(np.array_equal(clip.get_frame(2.5), middle))
+            finally:
+                clip.close()
+                resting.close()
+
+    def test_series_stagger_contract_and_independent_signed_bar_geometry(self):
+        for kind in ("bar", "horizontal"):
+            scene = ContentEffectTests().scene(kind=kind)
+            item = scene["elements"][0]
+            item["series_stagger"] = 0.5
+            validate_motion_scene(scene)
+            for p, expected in ((0, [0, 0, 0]), (0.125, [0.25, 0, 0]),
+                                (0.375, [0.75, 0.25, 0]),
+                                (0.625, [1, 0.75, 0.25]), (1, [1, 1, 1])):
+                self.assertEqual([composition.chart_series_progress(item, i, p)
+                                  for i in range(3)], expected)
+            image = composition.chart_animation_image(item, 400, 240, 0.375)
+            if kind == "bar":  # Baseline y=110; negative grows down, positive up.
+                self.assertEqual(image.getpixel((50, 165))[3], 255)
+                self.assertEqual(image.getpixel((50, 180))[3], 0)
+                self.assertEqual(image.getpixel((160, 95))[3], 255)
+                self.assertEqual(image.getpixel((160, 80))[3], 0)
+            else:  # Baseline x=240; negative grows left, positive right.
+                self.assertEqual(image.getpixel((145, 40))[3], 255)
+                self.assertEqual(image.getpixel((120, 40))[3], 0)
+                self.assertEqual(image.getpixel((265, 100))[3], 255)
+                self.assertEqual(image.getpixel((290, 100))[3], 0)
+            original = copy.deepcopy(item)
+            item.pop("series_stagger")
+            self.assertEqual(composition.chart_image(original, 400, 240).tobytes(),
+                             composition.chart_image(item, 400, 240).tobytes())
+        for value in (-0.1, 0.5001, True, float("nan"), float("inf"), "0.1"):
+            scene = ContentEffectTests().scene(kind="bar")
+            scene["elements"][0]["series_stagger"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_motion_scene(scene)
+        for kind in ("line", "area", "pie", "doughnut"):
+            scene = ContentEffectTests().scene(kind=kind, values=[1, 3])
+            scene["elements"][0]["series_stagger"] = 0
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                validate_motion_scene(scene)
+        scene = ContentEffectTests().scene(kind="bar")
+        scene.pop("motion_version")
+        scene["elements"][0].pop("animation")
+        scene["elements"][0]["series_stagger"] = 0.1
+        with self.assertRaises(ValueError):
+            validate_motion_scene(scene)
+
+
 class ContentEffectTests(unittest.TestCase):
     def scene(self, effect="chart-draw", kind="line", values=None):
         scene = entrance_scene(effect)
@@ -1422,6 +1552,163 @@ class PortableAssetTests(unittest.TestCase):
         composition.check_glyphs("℃", "test", family="sans")
         with self.assertRaises(ValueError):
             composition.check_glyphs("℃", "test", family="mono")
+
+
+class RichElementTests(unittest.TestCase):
+    @staticmethod
+    def path_scene():
+        scene = entrance_scene("path-draw")
+        scene["elements"][0].update(type="path", points=[[0.1, 0.2], [0.5, 0.2], [0.5, 0.8]])
+        del scene["elements"][0]["shape"]
+        return scene
+
+    @staticmethod
+    def group_scene():
+        scene = entrance_scene()
+        item = scene["elements"][0]
+        del item["animation"]
+        item.update(x=0.1, y=0.2, w=0.2, h=0.2, group="pair")
+        scene["elements"].append(dict(item, id="right", x=0.5))
+        scene["groups"] = [{"id": "pair", "keyframes": [
+            {"time": 0, "x": 0, "y": 0, "scale": 1, "opacity": 1},
+            {"time": 2, "x": 0.1, "y": 0.2, "scale": 1.5, "opacity": 0.5},
+        ]}]
+        return scene
+
+    def test_path_defaults_bounds_and_effect_ownership(self):
+        scene = validate_motion_scene(self.path_scene())
+        self.assertEqual(scene["elements"][0]["stroke_width"], 0.01)
+        invalid_points = ([], [[0, 0]], [[0, 0]] * 33, [[0, 0], [1]],
+                          [[0, 0], [True, 1]], [[0, 0], [float("nan"), 1]],
+                          [[0, 0], [1.01, 1]], [[0, 0], [-0.01, 1]])
+        for points in invalid_points:
+            scene = self.path_scene()
+            scene["elements"][0]["points"] = points
+            with self.subTest(points=points), self.assertRaises(ValueError):
+                validate_motion_scene(scene)
+        for width in (0.001, 0.051, True, float("inf")):
+            scene = self.path_scene()
+            scene["elements"][0]["stroke_width"] = width
+            with self.subTest(width=width), self.assertRaises(ValueError):
+                validate_motion_scene(scene)
+        for width in (0.002, 0.05):
+            scene = self.path_scene()
+            scene["elements"][0].update(points=[[0, 0], [1, 1]], stroke_width=width)
+            validate_motion_scene(scene)
+        scene = self.path_scene()
+        scene["elements"][0]["exit_animation"] = scene["elements"][0].pop("animation")
+        with self.assertRaises(ValueError):
+            validate_motion_scene(scene)
+        with self.assertRaises(ValueError):
+            validate_motion_scene(entrance_scene("path-draw"))
+
+    def test_path_arc_length_uses_rendered_aspect_and_partial_endpoint(self):
+        item = {"points": [[0, 0], [0.5, 0], [0.5, 1]]}
+        self.assertEqual(composition.path_points(item, 200, 100, 0.75),
+                         [(0, 0), (100, 0), (100, 50)])
+        self.assertEqual(composition.path_points(item, 100, 200, 0.5),
+                         [(0, 0), (50, 0), (50, 75)])
+        self.assertEqual(composition.path_points(item, 200, 100, -1), [])
+        item["points"] = [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]]
+        self.assertEqual(len(composition.path_points(item, 100, 100, 0.5)), 3)
+
+    def test_one_pixel_boundary_paths_remain_visible(self):
+        for points, sample in (([[1, 0], [1, 1]], (199, 50)),
+                               ([[0, 1], [1, 1]], (100, 99))):
+            item = {"points": points, "stroke_width": 0.002, "color": "#ffffff"}
+            image = composition.path_image(item, 200, 100)
+            with self.subTest(points=points):
+                self.assertEqual(image.getpixel(sample), (255, 255, 255, 255))
+
+    def test_path_clip_actual_reveal_and_out_of_order_seek(self):
+        import numpy as np
+        scene = validate_motion_scene(self.path_scene())
+        clip = composition.build_clip(scene, 200, 100)
+        try:
+            middle = clip.get_frame(1).copy()
+            full = clip.get_frame(2)
+            # Local geometry: horizontal 32 px, vertical 24 px; half ends x=84.
+            self.assertGreater(middle[38, 80, 0], 0)
+            self.assertEqual(middle[55, 100, 0], 0)
+            self.assertGreater(full[55, 100, 0], 0)
+            self.assertTrue(np.array_equal(middle, clip.get_frame(1)))
+            self.assertFalse(np.any(clip.get_frame(0)))
+            self.assertEqual(composition.motion_state(scene["elements"][0], 1)["opacity"], 1)
+        finally:
+            clip.close()
+
+    def test_group_pivot_additive_offsets_opacity_and_seek(self):
+        import numpy as np
+        scene = validate_motion_scene(self.group_scene())
+        original = copy.deepcopy(scene)
+        left, right = scene["elements"]
+        self.assertAlmostEqual(composition.scene_motion_state(scene, left, 2)["dx"], 0)
+        self.assertAlmostEqual(composition.scene_motion_state(scene, right, 2)["dx"], 0.2)
+        left["keyframes"] = [
+            {"time": 0, "x": 0.04, "y": 0, "scale": 0.8, "opacity": 0.4},
+            {"time": 2, "x": 0.04, "y": 0, "scale": 0.8, "opacity": 0.4},
+        ]
+        state = composition.scene_motion_state(scene, left, 2)
+        for key, expected in {"dx": 0.04, "dy": 0.2, "scale": 1.2, "opacity": 0.2}.items():
+            self.assertAlmostEqual(state[key], expected)
+        scene = original
+        clip = composition.build_clip(scene, 200, 100)
+        try:
+            end = clip.get_frame(2).copy()
+            ys, xs = np.where(end[:, :, 0] > 0)
+            self.assertEqual((xs.min(), xs.max(), ys.min(), ys.max()), (10, 189, 35, 64))
+            self.assertEqual(tuple(end[40, 20]), (128, 128, 128))
+            clip.get_frame(0)
+            self.assertTrue(np.array_equal(end, clip.get_frame(2)))
+            self.assertEqual(scene, original)
+        finally:
+            clip.close()
+
+    def test_group_validation_reuses_keyframe_rules_and_rejects_unknown_members(self):
+        for change in ("unknown", "duplicate", "too_many", "time", "rotation", "version"):
+            scene = self.group_scene()
+            if change == "unknown":
+                scene["elements"][0]["group"] = "missing"
+            elif change == "duplicate":
+                scene["groups"] *= 2
+            elif change == "too_many":
+                scene["groups"] = [dict(scene["groups"][0], id=str(i)) for i in range(9)]
+            elif change == "time":
+                scene["groups"][0]["keyframes"][1]["time"] = 0
+            elif change == "rotation":
+                scene["groups"][0]["keyframes"][0]["rotation"] = 30
+            else:
+                del scene["motion_version"]
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                validate_motion_scene(scene)
+
+    def test_path_pptx_is_static_native_connectors_after_roundtrip(self):
+        from pptx import Presentation
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+        from pptx.util import Inches, Emu
+        scene = validate_motion_scene(self.path_scene())
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        composition.export_slide(slide, scene, Inches(10), Inches(5))
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "path.pptx"
+            prs.save(str(path))
+            exported = Presentation(str(path)).slides[0]
+            from pptx.shapes.group import GroupShape
+            group = exported.shapes[0]
+            self.assertIsInstance(group, GroupShape)
+            assert isinstance(group, GroupShape)
+            self.assertEqual(group.name, "box")
+            self.assertEqual(len(group.shapes), 2)
+            for connector in group.shapes:
+                self.assertEqual(connector.shape_type, MSO_SHAPE_TYPE.LINE)
+                self.assertEqual(connector.line.width, Emu(round(Inches(2) * 0.01)))
+            first, second = group.shapes
+            self.assertEqual((first.left, first.top, first.width, first.height),
+                             (Inches(3.4), Inches(1.9), Inches(1.6), 0))
+            self.assertEqual((second.left, second.top, second.width, second.height),
+                             (Inches(5), Inches(1.9), 0, Inches(1.2)))
+            self.assertFalse(exported._element.xpath(".//p:timing"))
 
 
 if __name__ == "__main__":

@@ -90,6 +90,7 @@ def validate_composition(scene, text, number, object_fields):
             "padding",
             "motion_version",
             "transition",
+            "groups",
         ),
         "Canvas scene",
     )
@@ -117,6 +118,21 @@ def validate_composition(scene, text, number, object_fields):
     elements = scene.get("elements")
     if not isinstance(elements, list) or len(elements) > 16:
         raise ValueError("Canvas: use at most 16 elements.")
+    groups = scene.get("groups", [])
+    if not isinstance(groups, list) or len(groups) > 8:
+        raise ValueError("Canvas: use at most 8 groups.")
+    group_ids = set()
+    for group in groups:
+        object_fields(group, ("id", "keyframes"), "Group")
+        identifier = group.get("id")
+        if (not isinstance(identifier, str) or not identifier
+                or len(identifier) > 60 or identifier in group_ids):
+            raise ValueError("Each canvas group needs a unique text id.")
+        group_ids.add(identifier)
+        if scene.get("motion_version") != 1:
+            raise ValueError("Keyframed groups require motion_version 1.")
+        validate_keyframes(group.get("keyframes"), scene.get("duration"),
+                           f"Group {identifier}", number, object_fields)
     ids = set()
     for index, item in enumerate(elements, 1):
         where = f"Element {index}"
@@ -126,8 +142,9 @@ def validate_composition(scene, text, number, object_fields):
             "shape",
             "icon",
             "image",
+            "path",
         ):
-            raise ValueError(f"{where}: choose text, chart, shape, icon or image.")
+            raise ValueError(f"{where}: choose text, chart, shape, icon, image or path.")
         common = (
             "id",
             "type",
@@ -139,15 +156,21 @@ def validate_composition(scene, text, number, object_fields):
             "animation",
             "exit_animation",
             "keyframes",
+            "group",
         )
         fields = {
-            "text": ("text", "font_size", "bold", "align", "font_family"),
-            "chart": ("chart_type", "labels", "values"),
+            "text": ("text", "font_size", "bold", "align", "font_family", "chunks"),
+            "chart": ("chart_type", "labels", "values", "series_stagger"),
             "shape": ("shape",),
             "icon": ("icon",),
             "image": ("src", "alt", "fit"),
+            "path": ("points", "stroke_width"),
         }
         object_fields(item, common + fields[item["type"]], where)
+        if "group" in item:
+            group = item["group"]
+            if not isinstance(group, str) or group not in group_ids:
+                raise ValueError(f"{where}: group must name a scene group.")
         if "keyframes" in item:
             if scene.get("motion_version") != 1:
                 raise ValueError("Keyframed elements require motion_version 1.")
@@ -171,14 +194,24 @@ def validate_composition(scene, text, number, object_fields):
                     "wipe",
                     "characters",
                     "chart-draw",
+                    "path-draw",
+                    "chunks",
                 ):
                     raise ValueError(f"{where}: {effect} is an entrance-only effect.")
-                if effect in ("words", "characters") and item["type"] != "text":
+                if effect in ("words", "characters", "chunks") and item["type"] != "text":
                     raise ValueError(f"{where}: {effect} requires a text element.")
                 if effect == "chart-draw" and item["type"] != "chart":
                     raise ValueError(f"{where}: chart-draw requires a chart element.")
+                if effect == "path-draw" and item["type"] != "path":
+                    raise ValueError(f"{where}: path-draw requires a path element.")
+        if "chunks" in item or item.get("animation", {}).get("effect") == "chunks":
+            if scene.get("motion_version") != 1:
+                raise ValueError("Text chunks require motion_version 1.")
+            validate_chunks(item, scene.get("duration"), where, number, object_fields)
         if "animation" in item and "exit_animation" in item:
-            entrance_end = item["animation"]["start"] + item["animation"]["duration"]
+            entrance_end = (item["chunks"][-1]["start"] + item["chunks"][-1]["duration"]
+                            if item["animation"]["effect"] == "chunks" else
+                            item["animation"]["start"] + item["animation"]["duration"])
             exit_start = item["exit_animation"]["start"]
             if entrance_end > exit_start and not math.isclose(
                 entrance_end, exit_start, rel_tol=0, abs_tol=1e-9
@@ -222,6 +255,17 @@ def validate_composition(scene, text, number, object_fields):
             if item["fit"] not in ("cover", "contain"):
                 raise ValueError(f"{where}: choose cover or contain image fit.")
             decode_image(item.get("src"))
+        elif item["type"] == "path":
+            points = item.get("points")
+            if not isinstance(points, list) or not 2 <= len(points) <= 32:
+                raise ValueError(f"{where}: supply 2–32 path points.")
+            for point in points:
+                if not isinstance(point, list) or len(point) != 2:
+                    raise ValueError(f"{where}: path points must be [x, y] pairs.")
+                for coordinate in point:
+                    number(coordinate, f"{where} path coordinate", 0, 1)
+            item.setdefault("stroke_width", 0.01)
+            number(item["stroke_width"], f"{where} stroke width", 0.002, 0.05)
         elif item["type"] == "icon":
             if item.get("icon") not in ICONS:
                 raise ValueError(f"{where}: choose a supported icon.")
@@ -256,7 +300,48 @@ def validate_composition(scene, text, number, object_fields):
                 kind in ("pie", "doughnut") and (min(values) < 0 or sum(values) <= 0)
             ):
                 raise ValueError(f"{where}: invalid chart style or pie values.")
+            if "series_stagger" in item:
+                number(item["series_stagger"], f"{where} series stagger", 0, 0.5)
+                if scene.get("motion_version") != 1:
+                    raise ValueError("Staggered charts require motion_version 1.")
+                if kind not in ("bar", "horizontal"):
+                    raise ValueError(f"{where}: series stagger requires a bar chart.")
     return scene
+
+
+def validate_chunks(item, scene_duration, where, number, object_fields):
+    """Chunk timing is independent of the enclosing entrance's progress."""
+    if item.get("animation", {}).get("effect") != "chunks":
+        raise ValueError(f"{where}: text chunks require the chunks entrance effect.")
+    chunks = item.get("chunks")
+    if not isinstance(chunks, list) or not 1 <= len(chunks) <= 16:
+        raise ValueError(f"{where}: supply 1–16 text chunks.")
+    previous_end = 0
+    for chunk in chunks:
+        object_fields(chunk, ("text", "start", "duration"), f"{where} chunk")
+        if not isinstance(chunk.get("text"), str) or not chunk["text"]:
+            raise ValueError(f"{where}: each chunk needs nonempty text.")
+        number(chunk.get("start"), f"{where} chunk start", 0, scene_duration)
+        number(chunk.get("duration"), f"{where} chunk duration", 0.1, 3)
+        end = chunk["start"] + chunk["duration"]
+        if (chunk["start"] < previous_end and not math.isclose(
+                chunk["start"], previous_end, rel_tol=0, abs_tol=1e-9)):
+            raise ValueError(f"{where}: chunks must be chronological and nonoverlapping.")
+        if end > scene_duration and not math.isclose(
+                end, scene_duration, rel_tol=0, abs_tol=1e-9):
+            raise ValueError(f"{where}: chunks must end within the scene duration.")
+        previous_end = end
+    if "".join(chunk["text"] for chunk in chunks) != item.get("text"):
+        raise ValueError(f"{where}: chunk text must concatenate exactly to element text.")
+
+
+def chunk_visible_characters(item, t):
+    """Chronological nonoverlap makes each eased reveal a source prefix."""
+    count = 0
+    for chunk in item["chunks"]:
+        progress = min(1.0, max(0.0, (t - chunk["start"]) / chunk["duration"]))
+        count += math.floor((1 - (1 - progress) ** 3) * len(chunk["text"]))
+    return count
 
 
 def validate_keyframes(keyframes, scene_duration, where, number, object_fields):
@@ -310,6 +395,8 @@ def validate_animation(animation, scene_duration, where, number, object_fields):
         "wipe",
         "characters",
         "chart-draw",
+        "path-draw",
+        "chunks",
     ):
         raise ValueError(f"{where}: choose a supported entrance or exit effect.")
     if animation.get("easing") not in (
@@ -361,6 +448,7 @@ def reveal_progress(item, t):
         "wipe",
         "characters",
         "chart-draw",
+        "path-draw",
     ):
         return animation_progress(animation, t)
     return 1.0
@@ -380,7 +468,7 @@ def motion_state(item, t):
         if key not in item:
             continue
         animation = item[key]
-        if animation["effect"] in ("words", "wipe", "characters", "chart-draw"):
+        if animation["effect"] in ("words", "wipe", "characters", "chart-draw", "path-draw", "chunks"):
             continue
         progress = animation_progress(animation, t)
         disappearing = progress if key == "exit_animation" else 1 - progress
@@ -401,6 +489,30 @@ def motion_state(item, t):
         state["dy"] += authored["y"]
         state["scale"] *= authored["scale"]
         state["opacity"] *= authored["opacity"]
+    return state
+
+
+def scene_motion_state(scene, item, t):
+    """Compose group motion around members' resting bounding-box centre.
+
+    Element offsets stay additive; group scale moves resting centres and
+    multiplies each element's centred scale. Groups do not support rotation.
+    """
+    state = motion_state(item, t)
+    group = next((group for group in scene.get("groups", [])
+                  if group["id"] == item.get("group")), None)
+    if group is None:
+        return state
+    members = [member for member in scene["elements"]
+               if member.get("group") == group["id"]]
+    pose = keyframe_state(group["keyframes"], t)
+    for axis, size, offset in (("x", "w", "dx"), ("y", "h", "dy")):
+        centre = (min(member[axis] for member in members)
+                  + max(member[axis] + member[size] for member in members)) / 2
+        item_centre = item[axis] + item[size] / 2
+        state[offset] += pose[axis] + (item_centre - centre) * (pose["scale"] - 1)
+    state["scale"] *= pose["scale"]
+    state["opacity"] *= pose["opacity"]
     return state
 
 
@@ -568,6 +680,16 @@ def chart_font():
     return ImageFont.truetype(font_path(), 13)
 
 
+def chart_series_progress(item, index, progress):
+    """Normalised bar schedule; the final frame always contains actual data."""
+    progress = min(1.0, max(0.0, progress))
+    if progress == 1:
+        return 1.0
+    stagger = item.get("series_stagger", 0)
+    scheduled = progress * (1 + stagger * (len(item["values"]) - 1))
+    return min(1.0, max(0.0, scheduled - index * stagger))
+
+
 def chart_animation_image(item, width, height, progress):
     """Draw actual data in the browser's 400×240 viewport, never tween values.
 
@@ -658,17 +780,18 @@ def chart_animation_image(item, width, height, progress):
                     )
         else:
             for index, value in enumerate(values):
-                if value == 0:
+                local_progress = chart_series_progress(item, index, progress)
+                if value == 0 or local_progress == 0:
                     continue
                 if kind == "horizontal":
                     zero = 100 + (0 - low) / span * 280
-                    end = zero + value / span * 280 * progress
+                    end = zero + value / span * 280 * local_progress
                     y = 10 + index * 180 / count
                     draw.rectangle(
                         (min(zero, end), y, max(zero, end), y + 130 / count), fill=col
                     )
                 else:
-                    end = baseline - value / span * 160 * progress
+                    end = baseline - value / span * 160 * local_progress
                     x = 35 + index * 330 / count
                     draw.rectangle(
                         (x, min(baseline, end), x + 220 / count, max(baseline, end)),
@@ -854,6 +977,48 @@ def export_icon(slide, item, x, y, width, height, color):
     return group
 
 
+def path_points(item, width, height, progress=1):
+    """Reveal a polyline by rendered arc length, including a partial endpoint."""
+    points = [(x * width, y * height) for x, y in item["points"]]
+    progress = min(1.0, max(0.0, progress))
+    if progress == 0:
+        return []
+    if progress == 1:
+        return points
+    lengths = [math.hypot(b[0] - a[0], b[1] - a[1])
+               for a, b in zip(points, points[1:])]
+    remaining = sum(lengths) * progress
+    revealed = [points[0]]
+    for start, end, length in zip(points, points[1:], lengths):
+        if length <= remaining:
+            revealed.append(end)
+            remaining -= length
+        else:
+            fraction = remaining / length
+            revealed.append((start[0] + (end[0] - start[0]) * fraction,
+                             start[1] + (end[1] - start[1]) * fraction))
+            break
+    return revealed
+
+
+def path_image(item, width, height, progress=1):
+    """Stroke width is a fraction of the element's shorter side."""
+    image = Image.new("RGBA", (width, height))
+    points = path_points(item, width, height, progress)
+    # Arc length uses the full viewport; put boundary strokes on its last pixel
+    # so a one-pixel line at normalized coordinate 1 does not disappear.
+    points = [(min(width - 1, x), min(height - 1, y)) for x, y in points]
+    if len(points) >= 2:
+        draw = ImageDraw.Draw(image)
+        thickness = max(1, round(item.get("stroke_width", 0.01) * min(width, height)))
+        draw.line(points, fill=item["color"], width=thickness, joint="curve")
+        radius = thickness / 2
+        for x, y in points:
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius),
+                         fill=item["color"])
+    return image
+
+
 def element_images(scene, width, height):
     result = []
     for item in scene["elements"]:
@@ -866,6 +1031,8 @@ def element_images(scene, width, height):
             image = raster_image(item, w, h)
         elif item["type"] == "icon":
             image = icon_image(item, w, h)
+        elif item["type"] == "path":
+            image = path_image(item, w, h)
         else:
             image = Image.new("RGBA", (w, h))
             draw = ImageDraw.Draw(image)
@@ -907,12 +1074,20 @@ def build_clip(scene, width, height):
         for item, (overlay, x, y), cache in zip(
             scene["elements"], overlays, word_frames
         ):
-            state = motion_state(item, t)
+            state = scene_motion_state(scene, item, t)
             progress = reveal_progress(item, t)
             if state["opacity"] == 0 or progress == 0:
                 continue
             effect = item.get("animation", {}).get("effect")
-            if effect == "words" and progress < 1:
+            if effect == "chunks":
+                count = chunk_visible_characters(item, t)
+                if count < len(item["text"]):
+                    if count not in cache:
+                        cache[count] = text_image(
+                            item, *overlay.size, visible_characters=count
+                        )
+                    overlay = cache[count]
+            elif effect == "words" and progress < 1:
                 count = math.floor(progress * len(item["text"].split()))
                 if count not in cache:
                     cache[count] = text_image(item, *overlay.size, visible_words=count)
@@ -925,7 +1100,9 @@ def build_clip(scene, width, height):
                     )
                 overlay = cache[count]
             elif effect == "chart-draw" and progress < 1:
-                overlay = chart_animation_image(item, *overlay.size, progress)
+                overlay = chart_animation_image(item, overlay.width, overlay.height, progress)
+            elif effect == "path-draw" and progress < 1:
+                overlay = path_image(item, overlay.width, overlay.height, progress)
             elif effect == "wipe" and progress < 1:
                 overlay = overlay.copy()
                 alpha = overlay.getchannel("A")
@@ -1022,7 +1199,7 @@ def export_slide(slide, scene, width, height):
     from pptx.chart.data import CategoryChartData
     from pptx.dml.color import RGBColor
     from pptx.enum.chart import XL_CHART_TYPE
-    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
     from pptx.enum.text import PP_ALIGN
     from pptx.util import Emu, Pt
 
@@ -1065,6 +1242,17 @@ def export_slide(slide, scene, width, height):
             picture._element.nvPicPr.cNvPr.set("descr", item.get("alt", ""))
         elif item["type"] == "icon":
             export_icon(slide, item, x, y, w, h, color)
+        elif item["type"] == "path":
+            group = slide.shapes.add_group_shape()
+            group.name = item["id"]
+            points = [(round(x + px * w), round(y + py * h))
+                      for px, py in item["points"]]
+            for start, end in zip(points, points[1:]):
+                connector = group.shapes.add_connector(MSO_CONNECTOR.STRAIGHT,
+                                                       *start, *end)
+                connector.line.color.rgb = color
+                connector.line.width = Emu(round(item.get("stroke_width", 0.01)
+                                                * min(w, h)))
         elif item["type"] == "shape":
             shape = slide.shapes.add_shape(
                 {

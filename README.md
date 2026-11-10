@@ -39,9 +39,9 @@ Notes:
   `.env`, set the variable to empty, e.g. `GOOGLE_API_KEY= TTS_PROVIDER=google ...`.
 - `output/` (final videos) and `temp/` (TTS/image caches, intermediate
   artifacts) are gitignored except their `.gitkeep` placeholders.
-- Without the selected provider's key (or if the provider errors), scenes
-  render silently with a warning; without `MISTRAL_API_KEY`, AI image blocks
-  are skipped with a warning — the pipeline never hard-fails on missing AI.
+- The legacy CLI skips failed/missing TTS or optional Mistral AI images with
+  warnings. Studio's explicitly requested narration is strict: failure is an
+  error, never a successful silent narrated export.
 - System ffmpeg is used if installed; otherwise `imageio-ffmpeg` bundles one.
 
 ## Frame: local visual Studio
@@ -61,9 +61,8 @@ production server or a hosted collaboration service.
 
 - **Editor / Create** navigation switches between the canvas and a dedicated
   storyboard-generation page without overlays. Browser Back/Forward work;
-  navigation preserves the current project. Create offers explainer,
-  product-pitch and project-update prompt examples. A small 0.8B-parameter AI
-  runs on the browser CPU to write
+  navigation preserves the current project. Create offers explicit Local and
+  Hosted modes. In Local mode a small 0.8B-parameter AI runs on the browser CPU to write
   validated JSON from your title, description (20–3000 characters) and optional
   key points. Review the JSON, then explicitly
   approve replacing the project; edits invalidate stale previews.
@@ -126,10 +125,10 @@ production server or a hosted collaboration service.
 - Choose **Video + PowerPoint**, **Video only** or **PowerPoint only**. Video only skips PowerPoint preparation and export entirely. The latter reuses the
   CLI's `--pptx-only` path: no MP4 generation or encoding. Download links are
   offered only for successful output types.
-- Render an actual **silent MP4 and PPTX** with download links. Narration stays
-  in authored/exported JSON but is removed from the render copy. Inherited
-  provider credentials are excluded; rendering makes no AI calls. Timing uses
-  explicit scene durations, unlike narration-driven CLI renders.
+- Export **silent MP4 and PPTX** by default, or explicitly consent to narrated
+  export using the server-configured identity (see below). Silent export removes
+  narration only from its render copy. Render subprocesses receive no provider
+  credentials; approved audio is prepared separately. Studio uses explicit timing.
 - Up to 12 scenes, 16 elements per canvas, 60 seconds total, 1–15 seconds per
   scene. Resolutions: 1280×720, 1920×1080, 1080×1920, 720×1280, 1080×1080,
   2560×1440, 3840×2160, 2160×3840 and 2160×2160. 4K uses more time/memory and
@@ -139,9 +138,10 @@ production server or a hosted collaboration service.
   Canvas coordinates are normalised. Legacy MP4/PPTX layouts fit without distortion;
   freeform scenes use the full selected aspect ratio. Existing 1080p CLI defaults
   remain unchanged. Rendering uses
-  24/30 fps. Image scenes/AI image blocks and unsupported fields are rejected;
-  use the CLI for those features. The upstream sample includes an AI image
-  block, so it is not directly importable into this bounded editor.
+  24/30 fps. Legacy filesystem image scenes/agent image blocks and unsupported
+  fields are rejected; embedded PNG/JPEG canvas images are supported. Use the
+  CLI for legacy images. The upstream sample's agent image block is not directly
+  importable into Studio.
 - One render at a time, three-minute deadline and ten renders per server
   session. Outputs use private temporary directories, removed on shutdown;
   download them before stopping Studio. Refreshing reconnects to the latest
@@ -157,6 +157,42 @@ rather than silently showing missing-character boxes. Full colour emoji and
 complex emoji sequences are not supported. UI icons are SVG, not emoji. FontTools
 is used for font coverage (included by Matplotlib's dependency set).
 The existing CLI and AI integrations remain available.
+
+### Hosted generation and strict narration
+
+Configure server environment variables before starting Studio: `FRAME_GOOGLE_MODEL`
+with `GOOGLE_API_KEY` (or `GEMINI_API_KEY`), and/or `FRAME_MISTRAL_MODEL` with
+`MISTRAL_API_KEY`. No hosted text model is selected implicitly. Readiness means
+configuration is present, not that the account/model has been tested. See
+`.env.example`; keys never go to the browser.
+
+Hosted Create uses Google or Mistral structured JSON for grounded planning and
+composition. Review source fidelity and approve replacement explicitly. Consent
+covers sending the brief to the selected provider and applicable charges/data terms.
+Optional stages are one Google concept image (`FRAME_GOOGLE_IMAGE_MODEL`), advisory
+vision critique of up to three rendered frames, and one repair after critique.
+Images require Google mode and no supplied asset; critique requires a model/account
+with vision support. No automatic provider fallback or unbounded retries.
+
+A job permits 2–5 calls (two core stages plus selected options), at most 16,384
+output tokens per structured call, bounded input (title 1–100 characters,
+description 20–3000, up to six 180-character points) and a four-minute coordinator
+deadline. These are request bounds, **not a monetary cap or cost guarantee**.
+Cancellation rejects late results and stops local processing; submitted remote calls
+may still run and be charged. Safe client errors do not expose provider bodies or
+credentials. In-memory caches retain eight structured stages and two completed
+candidates; Studio shutdown clears them. Nothing is applied automatically.
+
+Narrated export requires separate consent and exact server settings
+`FRAME_TTS_PROVIDER` (`google`, `mistral` or `elevenlabs`), `FRAME_TTS_MODEL` and
+`FRAME_TTS_VOICE`, plus the corresponding key. Preparation makes up to 12 separate
+requests, one per narrated scene, with no retry or provider/model/voice fallback.
+Every scene needs a transcript (authored narration or derived visible text).
+Audio is decoded and measured before the credential-free renderer receives a
+controlled manifest. An explicit duration shorter than the audio fails; missing
+or corrupt required audio also fails. Captions are whole-scene transcript SRT cues,
+not word-aligned captions. Review pronunciation and timing. Cancellation does not
+make a paid request refundable; a new paid attempt requires consent again.
 
 ### Browser-local AI storyboard drafting
 
@@ -211,8 +247,18 @@ explicitly explaining that video animation is not reproduced. Entrance and exit 
 start after entrance tracks finish. Scene style offers Crossfade and Slide Left
 transitions into the following scene, with preview. Video keeps the total timeline
 duration unchanged: a transition occupies the beginning of the next scene.
-Native PowerPoint animation, loop effects, undo/redo and a full multitrack timeline
-are not yet implemented. Unsupported timing/effects are rejected rather than silently omitted.
+Undo/redo retains up to 12 project snapshots (also bounded to 8 MiB). **Advanced
+tracks** edits validated JSON for beats, groups and selected-element pose/path/chunk/
+chart-stagger fields; it is not a graphical multitrack sequencer. Paths, group
+transforms, semantic text chunks and per-value bar staggering share deterministic
+preview/video timing. PPTX stays static and editable; native PowerPoint animation
+and loop effects are not implemented. Unsupported timing/effects are rejected.
+
+**Regenerate shot** uses the hosted pipeline from current shot text and its first
+chart, constraining both planning and composition to a single replacement for
+explicit review. Other scenes are preserved; project changes invalidate the candidate.
+It does not preserve all selected shot styling/assets or guarantee continuity.
+Undo restores the prior project.
 
 Run the Studio checks:
 
@@ -231,6 +277,7 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
 
 ```json
 {
+  "version": 1,
   "meta":  { "fps": 30 },
   "theme": { "preset": "dark", "accent": "#58a6ff" },
   "voice": { "slug": "gb_jane_neutral" },
@@ -245,13 +292,19 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
 }
 ```
 
-- **Scene types**: `title`, `bullets`, `chart` (bar/line/pie), `image`, `outro`
+- **Validation**: `src/document.py` is shared by CLI and Studio. Unversioned
+  documents migrate to `version: 1`; other versions fail. Studio's scene/time/
+  resolution limits do not cap legacy CLI timelines, dimensions or frame rates.
+  Shared composition/motion/asset validation rejects malformed inputs before
+  rendering; legacy filesystem paths remain a CLI-only feature.
+- **Scene types**: `title`, `bullets`, `chart` (bar/line/pie), `image`, `outro`,
+  `composition` (native text, chart, shape, icon, embedded image and path elements)
 - **Animations**: `fade`, `slide-up`, `zoom-in`, `kenburns` (images)
 - **PPTX export**: every render also emits a `.pptx` alongside the MP4 —
   one slide per scene, built from the same artifacts (narration WAVs
   embedded on their slides, chart PNGs, generated images). Open in
-  PowerPoint, tweak, and export to video from there for a near-identical
-  result.
+  PowerPoint and tweak the deck. Frame composition motion is not reproduced;
+  PowerPoint's video output is not a guaranteed match.
 - **Editable PPTX charts**: chart scenes export as native PowerPoint charts
   (bar, line, pie) themed to the spec, so you can edit the data in
   PowerPoint. Set `"pptx_chart": "image"` on a chart scene to keep the
@@ -292,16 +345,6 @@ by construction) with the image in a bordered panel.
 
 See `samples/sample-spec.json` for a complete example.
 
-## Files
-
-- `src/render.py` — spec → MP4 renderer (MoviePy + Matplotlib)
-- `src/tts.py` — TTS contract + provider dispatch; Mistral Voxtral REST client (`/v1/audio/speech`)
-- `src/tts_google.py` — Google Gemini TTS adapter (`generateContent`, PCM/WAV)
-- `src/tts_elevenlabs.py` — ElevenLabs adapter (`/v1/text-to-speech/{voice_id}`, MP3)
-- `src/schema.json` — JSON Schema for the spec
-- `src/themes/presets.py` — dark/light color presets
-- `demos/` — rendered example videos from `samples/sample-spec.json`
-
 ## Notes
 
 - TTS is skipped gracefully (with a warning) when the selected provider's
@@ -310,8 +353,14 @@ See `samples/sample-spec.json` for a complete example.
 
 ## Narration providers
 
+The defaults, fallbacks and key guidance below describe the **legacy CLI**, not
+Studio's strict `FRAME_TTS_*` path. Provider model names, free tiers, licences,
+retirement dates and prices are inherited guidance, not freshly verified public
+facts. Confirm current availability and terms with the linked providers before
+use; configured readiness is not live capability or cost evidence.
+
 | `TTS_PROVIDER` | Key env var | Output | Default voice / model |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `mistral` (default) | `MISTRAL_API_KEY` | WAV (or `voice.format`) | `voice.slug`, else `gb_jane_neutral` fallbacks / `voxtral-mini-tts-2603` |
 | `google` | `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) | WAV | `Kore` / `gemini-3.8-flash-lite-tts` |
 | `elevenlabs` | `ELEVENLABS_API_KEY` | MP3 | first usable voice on your account / `eleven_multilingual_v2` |
@@ -335,7 +384,8 @@ Narration clips are cached in the workdir as
 `narr_<provider>_<hash>_<n>.<ext>`, where the hash covers the text,
 provider, voice, model and style, so switching provider or voice regenerates
 audio rather than replaying another provider's clips. (Caches from before
-this change are regenerated once.) AI image generation still uses Mistral.
+this change are regenerated once.) Legacy CLI AI image generation uses Mistral;
+Studio's optional hosted image stage uses an explicitly configured Google model.
 
 ### Getting a Google (Gemini API) key
 
@@ -346,7 +396,7 @@ this change are regenerated once.) AI image generation still uses Mistral.
   allowances on the [rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)
   page and [pricing](https://ai.google.dev/gemini-api/docs/pricing) page; on
   the free tier, Google may use prompts to improve its products. Image
-  generation is not on the free tier (and this repo's images use Mistral anyway).
+  generation has separate availability/pricing; verify the selected model's terms.
 - The default model is `gemini-3.8-flash-lite-tts`; if it is unavailable to
   your key, the adapter tries `gemini-3.8-flash-tts`, then
   `gemini-3.1-flash-tts-preview`, also moving on when a model's free-tier
@@ -463,9 +513,10 @@ The Icon tool adds editable check, arrow, star, info, target or heart elements.
 Geometry is shared between SVG preview, Pillow video frames and editable native
 PowerPoint paths. Scene animation presets coordinate entrances/exits without
 changing resting positions. Select an element to customise its motion afterwards.
-Bitmap image upload/generation, per-word text animation and per-series chart growth
-are not implemented. Generating images requires a separately reviewed model/runtime;
-no hosted image service is used implicitly.
+Supplied bitmap images, word/character/chunk text reveals and chart growth are
+supported. Hosted concept images are explicit opt-in, never an implicit local-mode
+service. Bar staggering sequences supplied values; this is not arbitrary multi-series
+chart authoring.
 
 ### Word and chart reveals
 
@@ -516,7 +567,8 @@ Add a PNG/JPEG in Create to support opening/body compositions, or use **Image** 
 the editor. Assets are embedded in project JSON, not fetched from URLs. Cover crops
 centrally; Contain preserves the entire image. Edit fit/description in element
 options. Images stay separate movable pictures in PowerPoint, not editable pixels.
-No image-generation model or stock-photo service is invoked.
+Supplied-image editing invokes no image-generation model or stock-photo service;
+hosted concept generation is a separate opt-in stage.
 
 Uploads are resampled locally to ≤1600 pixels and must fit 256 KiB encoded raster
 bytes per asset. Server validation permits ≤2048 pixels/side, ≤4 million pixels,
@@ -553,10 +605,9 @@ values or resting geometry. Reveal timing still follows easing. Short scenes cla
 tracks to preserve non-overlapping entrance/exit timing. Reduced motion still blocks
 autoplay. These are bounded deterministic curves, not a spring-physics simulation.
 
-Automatic raster generation needs a separately reviewed model/runtime or API with
-explicit download/privacy/cost consent. A small output image does not make the model
-small: for example FLUX.1-schnell is a 12-billion-parameter model. Current generation
-creates vector-led layouts automatically; it does not claim to generate photography.
+Local generation remains vector/supplied-image-led, without a diffusion download.
+Hosted mode can request one concept raster with explicit privacy/cost consent.
+Generated concept imagery is not factual photographic evidence.
 
 ### Directed sequences (not only animated slides)
 
@@ -578,6 +629,33 @@ remove them. Applying a scene preset replaces directed poses as well as entrance
 The HyperFrames examples gallery informed the separation of compositions and timed
 blocks (kinetic type, callouts, chart stories), but only its public text catalogue
 was inspected—not full video playback. Frame does not reproduce its HTML/GSAP/3D
-capabilities. There is still no remote storyboard API provider; local generation and
-validated imported JSON use the same portable render contract. Credentials currently
-serve the separate existing TTS/image CLI paths, not a newly activated paid generator.
+capabilities. Local generation, hosted candidates and validated imported JSON use
+the same portable render contract. The local compiler now infers only consumed
+editorial/layout/symbol/design and shot choices; palette/background/effect tokens
+are host-owned rather than redundant model decisions.
+
+### Rendered quality and evaluation
+
+Mechanical checks use actual Pillow text wrapping and sample composed element/group
+poses at 24 Hz plus authored cues. They report clipping, essential-content overlap
+and known-background contrast errors; reading holds and contrast over images,
+patterns or partial backgrounds need review. Source IDs and protected-fact checks
+are narrow guards, not proof that every paraphrase entails its source. These checks
+cannot replace full-film human watching or narrated listening.
+
+For offline corpus evidence, inspect the command first:
+
+```bash
+python3 scripts/evaluate_generation.py --help
+.venv/bin/python scripts/evaluate_generation.py --output /tmp/frame-eval
+# Optional: add --spec /path/to/candidate.json (repeatable)
+```
+
+Choose a new/empty output directory outside this repository. Outputs are silent
+full-film `film.mp4`, editable PPTX, scene PNGs, evidence JSON and `report.json`.
+The harness uses 6 fps at the smallest supported matching aspect ratio, not
+production-quality exports. Imported specs lack original-brief fidelity checks.
+It does not read `.env` or call providers. Implementation is present but verification
+is partial: live providers were not called and full human watch/listen review is
+not complete. See [generation design](docs/generation-design.md) for the contract
+and remaining release gates.

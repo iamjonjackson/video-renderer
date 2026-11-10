@@ -217,7 +217,9 @@ def _notes_text(scene: dict, art: dict) -> str:
     narration audio is a WAV, its length is added so presenters know the pacing.
     """
     per_bullet = scene.get("narration_per_bullet")
-    if per_bullet:
+    if art.get("transcript"):
+        lines = [art["transcript"], art.get("caption_disclosure", "")]
+    elif per_bullet:
         lines = [f"{i + 1}. {text}" for i, text in enumerate(per_bullet)]
     elif scene.get("narration"):
         lines = [scene["narration"]]
@@ -264,10 +266,10 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                     height=prs.slide_height,
                 )
             composition.export_slide(slide, scene, prs.slide_width, prs.slide_height)
-            if scene.get("narration") or any((item.get("animation") or item.get("keyframes")) for item in scene["elements"]):
+            if _notes_text(scene, art) or any((item.get("animation") or item.get("keyframes")) for item in scene["elements"]):
                 notes = slide.notes_slide.notes_text_frame
                 if notes is not None:
-                    notes.text = scene.get("narration", "") + ("\nVideo entrance animations are not reproduced in this static editable PowerPoint slide." if any((item.get("animation") or item.get("keyframes")) for item in scene["elements"]) else "")
+                    notes.text = _notes_text(scene, art) + ("\nVideo entrance animations are not reproduced in this static editable PowerPoint slide." if any((item.get("animation") or item.get("keyframes")) for item in scene["elements"]) else "")
             if art.get("narration_path"):
                 media = slide.shapes.add_movie(
                     art["narration_path"],

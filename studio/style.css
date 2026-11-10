@@ -2301,3 +2301,46 @@ body:has(#editor-page:not([hidden])) main {
 @font-face{font-family:"Frame Serif";src:url("/fonts/serif-bold.ttf") format("truetype");font-weight:700;font-display:block;}
 @font-face{font-family:"Frame Mono";src:url("/fonts/mono-regular.ttf") format("truetype");font-weight:400;font-display:block;}
 @font-face{font-family:"Frame Mono";src:url("/fonts/mono-bold.ttf") format("truetype");font-weight:700;font-display:block;}
+#track-panel{width:min(560px,90vw);max-height:85vh;overflow:auto}#track-json{width:100%;font-family:monospace}#quality-result{white-space:pre-wrap;max-height:60px;overflow:auto;font-size:11px}#hosted-controls{display:grid;gap:10px}#hosted-controls[hidden]{display:none}
+
+/* Responsive task hierarchy: project playback stays primary, secondary tools expand. */
+body:has(#editor-page:not([hidden])){height:auto;min-height:100dvh;overflow:auto;display:block}
+body:has(#editor-page:not([hidden])) main{display:block;padding:16px 24px}
+#editor-page,#editor-page .workspace{height:auto;min-height:0}
+#editor-page .workspace{grid-template-rows:auto;align-items:start}
+.scene-panel{position:sticky;top:16px;max-height:calc(100dvh - 120px)}
+.canvas-panel{gap:12px}
+.canvas-wrap{flex:none;height:clamp(280px,50dvh,640px);min-height:240px!important;padding:20px;overflow:visible}
+.canvas-toolbar,.tool-group{flex-wrap:wrap;gap:8px}
+.canvas-toolbar select{width:auto;max-width:100%;min-width:150px}
+.tool-group .button,.project-transport .button,.motion-transport .button{min-height:40px}
+.project-transport{display:grid;grid-template-columns:auto auto auto 70px minmax(100px,1fr);gap:8px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.project-transport output{grid-column:1/-1;overflow-wrap:anywhere}
+.project-transport input,.motion-transport input{width:100%;min-width:0}
+.scene-workbench,.narration-options{border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.scene-workbench>summary,.narration-options>summary{padding:12px;cursor:pointer;font-size:13px;font-weight:600;min-height:44px;box-sizing:border-box}
+.scene-workbench-body{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:0 12px 12px}
+.scene-workbench-body>.button{width:auto;min-height:40px}
+.scene-workbench-body>p:empty,#quality-result:empty{display:none}
+#shot-status,#quality-result{flex-basis:100%;margin:0;max-height:120px;overflow:auto;overflow-wrap:anywhere}
+.motion-transport{flex-basis:100%;display:flex;flex-wrap:wrap;padding:10px 0;gap:8px}
+.motion-transport input{flex:1;min-width:100px}
+.render-card{display:flex;flex-wrap:wrap;gap:12px;padding:14px;align-items:center}
+.render-card .export-controls{flex:1;min-width:150px}.render-card #render{margin:0;width:auto;min-height:44px}
+.narration-options{flex-basis:100%;order:3}.narration-options label,.narration-options p{display:block;padding:0 12px;margin:8px 0;overflow-wrap:anywhere}
+#render-status,#artifacts{flex-basis:100%;order:4}
+.scene-menu,#context-tools,#scene-settings{max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);box-sizing:border-box;overflow:auto}
+.scene-menu textarea{width:100%;box-sizing:border-box;min-width:0}
+.create-page{width:auto;box-sizing:border-box}.create-page fieldset{min-width:0}.create-page label{overflow-wrap:anywhere}
+@media(max-width:1000px){body:has(#editor-page:not([hidden])) main{padding:12px}.canvas-wrap{height:clamp(260px,45dvh,500px)}}
+@media(max-width:800px){
+ #editor-page .workspace{display:flex;flex-direction:column;height:auto}.scene-panel{position:relative;top:auto;max-height:none}.scene-list{max-width:100%;flex:none}
+ .canvas-panel{flex:none}.canvas-wrap{height:clamp(260px,43dvh,480px);padding:12px}.tool-group{width:100%}.canvas-toolbar select{flex:1;max-width:100%;width:auto}
+ .project-transport{grid-template-columns:repeat(3,minmax(0,1fr));padding:10px}.project-transport .button{font-size:12px;padding:8px 4px}.project-transport select{width:100%}.project-transport input{grid-column:2/4}.project-transport output{grid-column:1/-1}
+ .motion-transport select{max-width:none;flex:1}.motion-transport input{flex-basis:100%;order:2}.motion-transport output{order:3}
+ .render-card{flex-wrap:wrap;padding:12px}.render-card .export-controls{flex:1;min-width:0}.render-card #render{flex:1;white-space:normal}.narration-options{flex-basis:100%}
+ .create-page{margin:12px 0;padding:16px}.create-page .dialog-heading h1{font-size:26px}.topbar .compact-title{min-width:0;flex:1}
+}
+@media(max-width:400px){.tool-group .button{flex:1 0 60px;font-size:12px}.canvas-wrap{height:260px}.header-actions{flex-wrap:wrap!important}.project-transport{gap:6px}.page-nav a{padding:8px}}
+
+#track-panel:popover-open,#shot-panel:popover-open,#timing-panel:popover-open{position:fixed;inset:50% auto auto 50%;transform:translate(-50%,-50%);margin:0;width:min(560px,calc(100vw - 24px));max-height:calc(100dvh - 32px);overflow:auto;padding:18px}#shot-json{width:100%;box-sizing:border-box}

@@ -4,7 +4,6 @@ import argparse
 import copy
 import importlib
 import json
-import math
 import os
 import re
 import secrets
@@ -25,210 +24,10 @@ MAX_BODY = 3 * 1024 * 1024
 MAX_ARTIFACT = 100 * 1024 * 1024
 
 
-class SpecError(ValueError):
-    pass
-
-
-def validate_spec(value):
-    """Validate the Studio subset independently of the permissive CLI schema."""
-
-    def object_fields(obj, allowed, where):
-        if not isinstance(obj, dict) or set(obj) - set(allowed):
-            raise SpecError(f"{where}: expected an object with supported fields only.")
-
-    def text(value, where, maximum=600):
-        if not isinstance(value, str) or len(value) > maximum:
-            raise SpecError(f"{where}: use text of at most {maximum} characters.")
-
-    def number(value, where, low, high):
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (float, int))
-            or not low <= value <= high
-            or not math.isfinite(value)
-        ):
-            raise SpecError(f"{where}: use a number between {low} and {high}.")
-
-    object_fields(value, ("meta", "theme", "timeline", "voice"), "Project")
-    spec = copy.deepcopy(value)
-    meta = spec.setdefault("meta", {})
-    object_fields(meta, ("title", "fps", "resolution", "tts"), "Project settings")
-    if "tts" in meta:
-        object_fields(meta["tts"], ("provider", "voice", "model", "style"), "Narration")
-        for key, item in meta["tts"].items():
-            text(item, f"Narration {key}", 200)
-    text(meta.get("title", ""), "Project title", 100)
-    if meta.get("fps", 30) not in (24, 30):
-        raise SpecError("Frame rate: choose 24 or 30 fps.")
-    composition = importlib.import_module(
-        "src.composition" if __package__ else "composition"
-    )
-    resolution = meta.get("resolution", {"width": 1920, "height": 1080})
-    object_fields(resolution, ("width", "height"), "Resolution")
-    if any(type(resolution.get(key)) is not int for key in ("width", "height")):
-        raise SpecError("Resolution dimensions must be whole numbers.")
-    if (
-        resolution.get("width"),
-        resolution.get("height"),
-    ) not in composition.RESOLUTIONS:
-        raise SpecError("Choose a supported landscape, portrait or square resolution.")
-    theme = spec.setdefault("theme", {})
-    object_fields(
-        theme, ("preset", "bg", "fg", "accent", "font_size", "title_font_size"), "Theme"
-    )
-    if theme.get("preset", "dark") not in ("dark", "light"):
-        raise SpecError("Theme: choose dark or light.")
-    for key in ("bg", "fg", "accent"):
-        if key in theme and (
-            not isinstance(theme[key], str)
-            or not re.fullmatch(r"#[0-9a-fA-F]{6}", theme[key])
-        ):
-            raise SpecError(f"Theme {key}: use a six-digit hex colour.")
-    for key in ("font_size", "title_font_size"):
-        if key in theme:
-            number(theme[key], f"Theme {key}", 24, 120)
-            if not isinstance(theme[key], int):
-                raise SpecError(f"Theme {key}: use a whole number.")
-    if "voice" in spec:
-        object_fields(spec["voice"], ("slug", "voice_id", "model", "format"), "Voice")
-        for key, item in spec["voice"].items():
-            text(item, f"Voice {key}", 100)
-    scenes = spec.get("timeline")
-    if not isinstance(scenes, list) or not 1 <= len(scenes) <= 12:
-        raise SpecError("Timeline: include between 1 and 12 scenes.")
-    for index, scene in enumerate(scenes, 1):
-        if not isinstance(scene, dict):
-            raise SpecError(f"Scene {index}: expected an object.")
-        scene.setdefault("duration", 4)
-        number(scene["duration"], f"Scene {index} duration", 1, 15)
-    duration = 0
-    common = ("type", "duration", "anim", "narration", "padding")
-    fields = {
-        "title": ("text", "subtitle"),
-        "outro": ("text",),
-        "bullets": ("heading", "items", "stagger", "narration_per_bullet"),
-        "chart": ("heading", "chart_type", "labels", "values", "y_label", "pptx_chart"),
-        "composition": (
-            "name",
-            "elements",
-            "background",
-            "motion_version",
-            "transition",
-        ),
-    }
-    for index, scene in enumerate(scenes, 1):
-        where = f"Scene {index}"
-        if (
-            not isinstance(scene, dict)
-            or not isinstance(scene.get("type"), str)
-            or scene["type"] not in fields
-        ):
-            raise SpecError(
-                f"{where}: choose title, bullets, chart or outro. Image scenes are CLI-only."
-            )
-        kind = scene["type"]
-        if kind == "composition":
-            try:
-                composition.validate_composition(scene, text, number, object_fields)
-            except ValueError as error:
-                raise SpecError(f"{where}: {error}") from error
-        object_fields(scene, common + fields[kind], where)
-        for key in ("text", "subtitle", "heading", "y_label", "narration"):
-            if key in scene:
-                text(
-                    scene[key],
-                    f"{where} {key}",
-                    (7205 if kind == "composition" else 1200)
-                    if key == "narration"
-                    else 300,
-                )
-                if key != "narration":
-                    composition.check_glyphs(scene[key], f"{where} {key}")
-        if kind in ("title", "outro") and not scene.get("text", "").strip():
-            raise SpecError(f"{where}: add some text.")
-        if "transition" in scene and kind == "composition":
-            transition = scene["transition"]
-            object_fields(transition, ("effect", "duration"), "Scene transition")
-            if scene.get("motion_version") != 1 or transition.get("effect") not in (
-                "crossfade",
-                "slide-left",
-            ):
-                raise SpecError("Choose a supported v1 scene transition.")
-            number(transition.get("duration"), "Transition duration", 0.1, 1)
-            if index == len(scenes):
-                raise SpecError("The final scene cannot transition to a missing scene.")
-            if scene["transition"]["duration"] > scenes[index].get("duration", 4):
-                raise SpecError("Transition must fit the following scene.")
-        if scene.get("anim", "fade") not in ("fade", "slide-up", "zoom-in"):
-            raise SpecError(f"{where}: unsupported animation.")
-        if "padding" in scene:
-            number(scene["padding"], f"{where} padding", 0, 3)
-        if kind == "bullets":
-            items = scene.get("items")
-            if not isinstance(items, list) or not 1 <= len(items) <= 6:
-                raise SpecError(f"{where}: add between 1 and 6 bullets.")
-            for item in items:
-                text(item, f"{where} bullet", 180)
-                composition.check_glyphs(item, f"{where} bullet")
-                if not item.strip():
-                    raise SpecError(f"{where}: bullets cannot be empty.")
-            number(scene.get("stagger", 0.4), f"{where} stagger", 0, 2)
-            if "narration_per_bullet" in scene:
-                narrations = scene["narration_per_bullet"]
-                if not isinstance(narrations, list) or len(narrations) != len(items):
-                    raise SpecError(
-                        f"{where}: per-bullet narration must match the bullets."
-                    )
-                for item in narrations:
-                    text(item, f"{where} narration", 1200)
-        if kind == "chart":
-            labels, values = scene.get("labels"), scene.get("values")
-            if (
-                not isinstance(labels, list)
-                or not isinstance(values, list)
-                or not 1 <= len(labels) <= 8
-                or len(labels) != len(values)
-            ):
-                raise SpecError(
-                    f"{where}: supply 1–8 matching chart labels and values."
-                )
-            for label in labels:
-                text(label, f"{where} label", 40)
-                composition.check_glyphs(label, f"{where} label")
-            for item in values:
-                number(item, f"{where} chart value", -1000000, 1000000)
-            scene.setdefault("chart_type", "bar")
-            if scene["chart_type"] not in ("bar", "line", "pie"):
-                raise SpecError(f"{where}: choose bar, line or pie.")
-            if scene.get("pptx_chart", "native") not in ("native", "image"):
-                raise SpecError(f"{where}: pptx_chart must be native or image.")
-            if scene["chart_type"] == "pie" and (
-                any(v < 0 for v in values) or sum(values) <= 0
-            ):
-                raise SpecError(
-                    f"{where}: pie values must be non-negative with a positive total."
-                )
-        scene.setdefault("duration", 4)
-        number(scene["duration"], f"{where} duration", 1, 15)
-        duration += scene["duration"]
-    if duration > 60:
-        raise SpecError("Timeline: keep the total duration at 60 seconds or less.")
-    if __package__:
-        from .canvas_assets import image_bytes
-    else:
-        from canvas_assets import image_bytes
-
-    total_assets = sum(
-        len(image_bytes(item["src"]))
-        for scene in spec["timeline"]
-        for item in scene.get("elements", [])
-        if item.get("type") == "image"
-    )
-    if total_assets > 2 * 1024 * 1024:
-        raise SpecError(
-            "Project image assets exceed 2 MiB. Use smaller or fewer images."
-        )
-    return spec
+if __package__:
+    from .document import SpecError, validate_spec
+else:
+    from document import SpecError, validate_spec
 
 
 def silent_spec(spec):
@@ -248,13 +47,15 @@ class RenderJobs:
         self.process = None
         self.closed = False
         self.timeout = timeout
+        self.cancelled = threading.Event()
+        self.worker = None
         self.storage = tempfile.TemporaryDirectory(prefix="video-studio-")
 
     def snapshot(self):
         with self.lock:
             return copy.deepcopy(self.job)
 
-    def start(self, spec, output_format="video"):
+    def start(self, spec, output_format="video", narration=None):
         if output_format not in ("video", "video-only", "pptx"):
             raise SpecError("Export format: choose video, video-only or pptx.")
         with self.lock:
@@ -271,17 +72,22 @@ class RenderJobs:
             directory = Path(self.storage.name) / job_id
             directory.mkdir(mode=0o700)
             (directory / "spec.json").write_text(json.dumps(silent_spec(spec)))
+            if narration:
+                (directory / "narration-source.json").write_text(json.dumps(spec))
             self.job = {
                 "id": job_id,
                 "state": "rendering",
                 "message": "Rendering on your computer…",
                 "artifacts": [],
             }
-            threading.Thread(
+            self.worker = threading.Thread(
                 target=self._render,
-                args=(job_id, directory, output_format),
+                args=(job_id, directory, output_format, narration)
+                if narration
+                else (job_id, directory, output_format),
                 daemon=True,
-            ).start()
+            )
+            self.worker.start()
             return copy.deepcopy(self.job)
 
     @staticmethod
@@ -291,13 +97,14 @@ class RenderJobs:
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait()
 
-    def _render(self, job_id, directory, output_format="video"):
+    def _render(self, job_id, directory, output_format="video", narration=None):
         # Explicit allowlist: no inherited API keys, Python injection or cloud credentials.
         environment = {
             key: os.environ[key]
             for key in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT")
             if key in os.environ
         }
+        environment["PYTHON_DOTENV_DISABLED"] = "1"
         environment["MPLCONFIGDIR"] = str(directory / "matplotlib")
         message, artifacts, state = (
             "Render failed. Check that the renderer dependencies are installed.",
@@ -305,6 +112,39 @@ class RenderJobs:
             "failed",
         )
         try:
+            manifest = None
+            if narration:
+                module = importlib.import_module(
+                    "src.narration" if __package__ else "narration"
+                )
+                source = json.loads((directory / "narration-source.json").read_text())
+                for scene in source["timeline"]:
+                    if not scene.get("narration"):
+                        scene["narration"] = (
+                            " ".join(
+                                item.get("text", "")
+                                for item in scene.get("elements", [])
+                                if item.get("type") == "text"
+                            )
+                            or " ".join(scene.get("items", []))
+                            or scene.get("text", "")
+                            or scene.get("heading", "")
+                        )
+                    if not scene["narration"].strip():
+                        raise ValueError(
+                            "Narrated exports require a transcript for every scene."
+                        )
+                manifest = module.prepare_narration(
+                    source,
+                    directory,
+                    os.environ.get("FRAME_TTS_PROVIDER", ""),
+                    os.environ.get("FRAME_TTS_MODEL", ""),
+                    os.environ.get("FRAME_TTS_VOICE", ""),
+                    narration["consent"],
+                    cancelled=self.cancelled,
+                    max_requests=narration.get("max_requests", 12),
+                )
+                (directory / "spec.json").write_text(json.dumps(source))
             with self.lock:
                 if self.closed:
                     return
@@ -317,6 +157,8 @@ class RenderJobs:
                     "--workdir",
                     str(directory / "cache"),
                 ]
+                if manifest:
+                    command.extend(["--media-manifest", str(manifest)])
                 if output_format == "pptx":
                     command.append("--pptx-only")
                 elif output_format == "video-only":
@@ -341,6 +183,8 @@ class RenderJobs:
                 raise RuntimeError(message)
             mp4 = directory / "video.mp4"
             if output_format in ("video", "video-only"):
+                if (directory / "video.srt").is_file():
+                    artifacts.append("srt")
                 if not mp4.is_file() or not 0 < mp4.stat().st_size <= MAX_ARTIFACT:
                     raise RuntimeError("The renderer did not produce a usable video.")
                 artifacts.append("mp4")
@@ -369,7 +213,7 @@ class RenderJobs:
                     if "pptx" in artifacts
                     else "Video ready. PowerPoint export failed; only the video is available."
                 )
-        except (OSError, RuntimeError, zipfile.BadZipFile) as error:
+        except (OSError, ValueError, RuntimeError, zipfile.BadZipFile) as error:
             message = str(error)
         finally:
             with self.lock:
@@ -385,6 +229,7 @@ class RenderJobs:
         if not re.fullmatch(r"[a-f0-9]{32}", job_id) or extension not in (
             "mp4",
             "pptx",
+            "srt",
         ):
             return None
         path = Path(self.storage.name) / job_id / f"video.{extension}"
@@ -405,10 +250,14 @@ class RenderJobs:
     def close(self):
         with self.lock:
             self.closed = True
+            self.cancelled.set()
             process = self.process
         if process:
             self.terminate(process)
-        self.storage.cleanup()
+        if self.worker is not None:
+            self.worker.join(timeout=65)
+        if self.worker is None or not self.worker.is_alive():
+            self.storage.cleanup()
 
 
 class StudioServer(ThreadingHTTPServer):
@@ -419,11 +268,16 @@ class StudioServer(ThreadingHTTPServer):
         self.jobs = jobs
         module = importlib.import_module("src.ai_setup" if __package__ else "ai_setup")
         self.ai_setup = module.AISetup(WEB / "ai-assets")
+        generation = importlib.import_module(
+            "src.generation" if __package__ else "generation"
+        )
+        self.generation = generation.GenerationJobs()
         self.token = secrets.token_urlsafe(32)
         self.origin = f"http://127.0.0.1:{self.server_port}"
 
     def server_close(self):
         self.ai_setup.close()
+        self.generation.close()
         super().server_close()
 
 
@@ -500,6 +354,10 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.reply(
                     200, Path(composition.font_path(*font)).read_bytes(), "font/ttf"
                 )
+        elif self.path == "/api/generation/capabilities":
+            self.reply(200, self.studio.generation.capabilities())
+        elif self.path == "/api/generation":
+            self.reply(200, {"job": self.studio.generation.snapshot()})
         elif self.path == "/api/ai-setup":
             self.reply(200, self.studio.ai_setup.snapshot())
         elif self.path == "/api/job":
@@ -517,6 +375,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                     path.read_bytes(),
                     "video/mp4"
                     if parts[4] == "mp4"
+                    else "text/plain; charset=utf-8"
+                    if parts[4] == "srt"
                     else "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
             else:
@@ -545,6 +405,23 @@ class StudioHandler(BaseHTTPRequestHandler):
                 "/ai-visuals.mjs": ("ai-visuals.mjs", "text/javascript; charset=utf-8"),
                 "/authoring.js": ("authoring.js", "text/javascript; charset=utf-8"),
                 "/scene-menus.js": ("scene-menus.js", "text/javascript; charset=utf-8"),
+                "/shot-regeneration.js": (
+                    "shot-regeneration.js",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/timeline-editor.js": (
+                    "timeline-editor.js",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/rich-elements.js": (
+                    "rich-elements.js",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/hosted-generation.js": (
+                    "hosted-generation.js",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/history.js": ("history.js", "text/javascript; charset=utf-8"),
                 "/sequence-director.mjs": (
                     "sequence-director.mjs",
                     "text/javascript; charset=utf-8",
@@ -620,6 +497,9 @@ class StudioHandler(BaseHTTPRequestHandler):
             return
         if self.path not in (
             "/api/render",
+            "/api/generation/start",
+            "/api/generation/cancel",
+            "/api/quality",
             "/api/validate",
             "/api/ai-setup/start",
             "/api/ai-setup/cancel",
@@ -633,7 +513,23 @@ class StudioHandler(BaseHTTPRequestHandler):
             if not 0 < length <= MAX_BODY:
                 raise SpecError("Project must be smaller than 3 MiB.")
             payload = json.loads(self.rfile.read(length))
-            if self.path == "/api/ai-setup/start":
+            if self.path == "/api/generation/start":
+                self.reply(202, {"job": self.studio.generation.start(payload)})
+            elif self.path == "/api/generation/cancel":
+                if (
+                    not isinstance(payload, dict)
+                    or set(payload) != {"id"}
+                    or not isinstance(payload["id"], str)
+                ):
+                    raise SpecError("Provide the generation job ID.")
+                self.studio.generation.cancel(payload["id"])
+                self.reply(200, {"job": self.studio.generation.snapshot()})
+            elif self.path == "/api/quality":
+                quality = importlib.import_module(
+                    "src.quality" if __package__ else "quality"
+                )
+                self.reply(200, quality.inspect_document(validate_spec(payload)))
+            elif self.path == "/api/ai-setup/start":
                 if (
                     not isinstance(payload, dict)
                     or payload != {"consent": True}
@@ -650,10 +546,19 @@ class StudioHandler(BaseHTTPRequestHandler):
             elif self.path == "/api/validate":
                 self.reply(200, {"spec": validate_spec(payload)})
             else:
-                if not isinstance(payload, dict) or set(payload) != {"spec", "format"}:
+                if (
+                    not isinstance(payload, dict)
+                    or not {"spec", "format"} <= set(payload)
+                    or set(payload) - {"spec", "format", "narration"}
+                ):
                     raise SpecError("Provide a project and export format.")
                 spec = validate_spec(payload["spec"])
-                self.reply(202, self.studio.jobs.start(spec, payload["format"]))
+                narration = payload.get("narration")
+                if narration is not None and narration != {"consent": True}:
+                    raise SpecError("Confirm narration charges.")
+                self.reply(
+                    202, self.studio.jobs.start(spec, payload["format"], narration)
+                )
         except (ValueError, UnicodeDecodeError) as error:
             self.reply(400, {"error": str(error)})
         except RuntimeError as error:

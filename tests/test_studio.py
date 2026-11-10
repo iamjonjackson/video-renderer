@@ -191,6 +191,29 @@ class ApiTests(unittest.TestCase):
         headers["Origin"] = f"http://127.0.0.1:{self.server.server_port}"
         self.assertEqual(self.request("/api/job", headers=headers)[0], 403)
 
+    def test_hosted_generation_http_wiring_and_consent(self):
+        headers = {
+            "Content-Type": "application/json",
+            "X-Studio-Token": self.server.token,
+        }
+        self.assertEqual(self.request("/api/generation", headers=headers)[0], 200)
+        self.assertEqual(
+            self.request("/api/generation/start", "POST", {}, headers)[0], 400
+        )
+        with patch.object(
+            self.server.generation,
+            "start",
+            return_value={"id": "fixture", "state": "running"},
+        ) as start:
+            payload = {"consent": True, "brief": {"title": "Test"}}
+            status, body = self.request(
+                "/api/generation/start", "POST", payload, headers
+            )
+            self.assertEqual(status, 202)
+            self.assertEqual(json.loads(body)["job"]["id"], "fixture")
+            start.assert_called_once_with(payload)
+        self.assertEqual(self.request("/api/quality", "POST", BASE, headers)[0], 200)
+
     def test_invalid_spec_does_not_launch(self):
         with patch.object(self.jobs, "start") as start:
             invalid = [

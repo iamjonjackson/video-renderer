@@ -14,6 +14,7 @@ AI images and charts still generated, or reused from the workdir cache).
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +41,7 @@ import presets
 
 import composition
 import images as imggen
+import narration
 import tts
 
 ANIM_IN = 0.6
@@ -81,7 +83,12 @@ def _resolve_font(bold: bool = False) -> str:
 
 
 def load_spec(path: str) -> dict:
-    spec = json.loads(Path(path).read_text())
+    if __package__:
+        from .document import validate_spec
+    else:
+        from document import validate_spec
+
+    spec = validate_spec(json.loads(Path(path).read_text()), studio=False)
     theme = dict(presets.__dict__[spec.get("theme", {}).get("preset", "dark")])
     theme.update({k: v for k, v in spec.get("theme", {}).items() if k != "preset"})
     spec["theme"] = theme
@@ -587,17 +594,20 @@ def collect_artifacts(
     return art
 
 
-def render_pptx_only(spec: dict, output: str, workdir: Path):
+def render_pptx_only(spec: dict, output: str, workdir: Path, media=None):
     """Build the deck from narration, chart and image artifacts alone: no
     clips, segments or MP4."""
     theme = spec["theme"]
-    voice_cfg = narration_config(spec)
+    voice_cfg = narration_config(spec) if media is None else None
     scene_artifacts = []
     t_cursor = 0.0
     for i, scene in enumerate(spec["timeline"]):
-        audio_path, audio_dur = scene_narration(scene, i, workdir, voice_cfg)
-        dur = scene_duration(scene, audio_dur)
-        scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
+        audio_path, audio_dur, dur = scene_media(scene, i, workdir, voice_cfg, media)
+        art = collect_artifacts(scene, theme, workdir, audio_path)
+        if media is not None and i in media:
+            art["transcript"] = media[i]["captions"][0]["text"]
+            art["caption_disclosure"] = narration.CAPTION_DISCLOSURE
+        scene_artifacts.append(art)
         print(
             f"[scene {i}] {scene['type']}: {dur:.2f}s starting at {t_cursor:.2f}s"
             + (f" (narration {audio_dur:.2f}s)" if audio_path else "")
@@ -606,16 +616,67 @@ def render_pptx_only(spec: dict, output: str, workdir: Path):
     _export_pptx(spec, scene_artifacts, output, strict=True)
 
 
+def scene_media(scene, index, workdir, voice_cfg, media):
+    if media is None:
+        path, duration = scene_narration(scene, index, workdir, voice_cfg)
+        return path, duration, scene_duration(scene, duration)
+    entry = media.get(index)
+    if entry is None:
+        return None, 0.0, scene_duration(scene, 0.0)
+    duration = entry["duration"]
+    return entry["path"], duration, narration.prepared_scene_duration(scene, duration)
+
+
 def render(
     spec_path: str, output: str, workdir: str | None = None,
-    render_video: bool = True, export_pptx: bool = True
+    render_video: bool = True, export_pptx: bool = True,
+    media_manifest: str | None = None,
 ):
-    """Render video and/or PowerPoint; existing callers export both by default."""
+    """Render video and/or PowerPoint; prepared media needs no provider keys."""
+    if media_manifest is not None and any(
+        marker in name.upper()
+        for name in os.environ
+        for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+    ):
+        # Keep credentials out of every MoviePy/ffmpeg descendant, including
+        # compressed audio embedded by PowerPoint. Studio should launch with
+        # this same allowlisted environment; direct callers are isolated here.
+        env = {name: os.environ[name] for name in
+               ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR")
+               if name in os.environ}
+        env["PYTHON_DOTENV_DISABLED"] = "1"
+        command = [sys.executable, str(Path(__file__).resolve()), str(spec_path),
+                   "-o", str(output), "--media-manifest", str(media_manifest)]
+        if workdir is not None:
+            command.extend(["--workdir", str(workdir)])
+        if not render_video:
+            command.append("--pptx-only")
+        elif not export_pptx:
+            command.append("--video-only")
+        if not render_video and not export_pptx:
+            raise ValueError("At least one export must be requested.")
+        subprocess.run(command, env=env, check=True)
+        return
+    resources = []
+    try:
+        return _render_impl(spec_path, output, workdir, render_video,
+                            export_pptx, media_manifest, resources)
+    finally:
+        closed = set()
+        for resource in reversed(resources):
+            if id(resource) not in closed:
+                closed.add(id(resource))
+                resource.close()
+
+
+def _render_impl(spec_path, output, workdir, render_video, export_pptx,
+                 media_manifest, resources):
     if not render_video and not export_pptx:
         raise ValueError("At least one export must be requested.")
     spec = load_spec(spec_path)
     theme = spec["theme"]
-    voice_cfg = narration_config(spec)
+    media = narration.load_media_manifest(media_manifest, spec) if media_manifest is not None else None
+    voice_cfg = narration_config(spec) if media is None else None
     resolution = spec["meta"]["resolution"]
     width, height = resolution["width"], resolution["height"]
     if (width, height) not in composition.RESOLUTIONS:
@@ -628,11 +689,12 @@ def render(
     workdir.mkdir(parents=True, exist_ok=True)
 
     if not render_video:
-        render_pptx_only(spec, output, workdir)
+        render_pptx_only(spec, output, workdir, media=media)
         return
 
     video_clips, audios = [], []
     scene_artifacts = []
+    scene_durations = []
     t_cursor = 0.0
     fps = spec["meta"]["fps"]
     stream = len(spec["timeline"]) > 12
@@ -643,6 +705,7 @@ def render(
             f"[stream] long timeline ({len(spec['timeline'])} scenes); rendering per-scene segments"
         )
     for i, scene in enumerate(spec["timeline"]):
+        scene_resources_start = len(resources)
         stype = scene["type"]
         if stype == "composition":
             clip = composition.build_clip(scene, width, height)
@@ -652,6 +715,7 @@ def render(
         else:
             clip = BUILDERS[stype](scene, theme)
 
+        resources.append(clip)
         if stype != "composition" and (width, height) != (W, H):
             # Legacy scenes keep their established layout, fitted without distortion.
             scaled = clip.resized(min(width / W, height / H))
@@ -663,9 +727,8 @@ def render(
                 size=(width, height),
             )
 
-        audio_path, audio_dur = scene_narration(scene, i, workdir, voice_cfg)
-
-        dur = scene_duration(scene, audio_dur)
+        audio_path, audio_dur, dur = scene_media(scene, i, workdir, voice_cfg, media)
+        scene_durations.append(dur)
         clip = clip.with_duration(dur)
         if scene.get("motion_version") != 1:
             clip = apply_anim(clip, scene.get("anim", "fade"), dur)
@@ -678,21 +741,38 @@ def render(
                 [clip.with_position("center")], size=(width, height)
             ).with_duration(dur)
 
+        resources.append(clip)
         if audio_path:
-            audios.append(AudioFileClip(audio_path).with_start(t_cursor))
+            audio = AudioFileClip(audio_path)
+            resources.append(audio)
+            audios.append(audio.with_start(t_cursor))
 
         # Bound memory on long timelines: render each scene straight to a
         # disk segment and release it, instead of holding every composite.
         if stream:
             seg = seg_dir / f"seg_{i:03d}.mp4"
             clip.write_videofile(str(seg), fps, codec="libx264", logger=None)
-            clip.close()
-            del clip
+            # Release completed scene composites instead of retaining their
+            # child image arrays until the entire streaming render finishes.
+            scene_resources = resources[scene_resources_start:]
+            resources[scene_resources_start:] = [audio] if audio_path else []
+            closed = set()
+            for resource in reversed(scene_resources):
+                if audio_path and resource is audio:
+                    continue
+                if id(resource) not in closed:
+                    closed.add(id(resource))
+                    resource.close()
+            del scene_resources, resource, clip
         else:
             video_clips.append(clip)
 
         if export_pptx:
-            scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
+            art = collect_artifacts(scene, theme, workdir, audio_path)
+            if media is not None and i in media:
+                art["transcript"] = media[i]["captions"][0]["text"]
+                art["caption_disclosure"] = narration.CAPTION_DISCLOSURE
+            scene_artifacts.append(art)
 
         print(
             f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
@@ -765,6 +845,7 @@ def render(
         if has_transitions
         else concatenate_videoclips(video_clips, method="compose")
     )
+    resources.append(final)
     if audios:
         final = final.with_audio(CompositeAudioClip(audios))
     final.write_videofile(
@@ -772,8 +853,10 @@ def render(
     )
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
 
+    if media is not None:
+        narration.write_srt(output, media, scene_durations)
     if export_pptx:
-        _export_pptx(spec, scene_artifacts, output)
+        _export_pptx(spec, scene_artifacts, output, strict=media is not None)
 
 
 if __name__ == "__main__":
@@ -781,6 +864,7 @@ if __name__ == "__main__":
     p.add_argument("spec")
     p.add_argument("-o", "--output", default="output/video.mp4")
     p.add_argument("--workdir", default=None)
+    p.add_argument("--media-manifest", default=None, help="server-prepared narration manifest; bypass TTS and provider keys")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument(
         "--pptx-only",
@@ -797,4 +881,5 @@ if __name__ == "__main__":
     render(
         args.spec, args.output, args.workdir,
         render_video=not args.pptx_only, export_pptx=not args.video_only,
+        media_manifest=args.media_manifest,
     )

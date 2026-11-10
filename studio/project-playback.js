@@ -90,7 +90,7 @@ function renderProjectTime(time) {
 		[...node.querySelectorAll(".thumbnail-element")].forEach(
 			(element, index) => {
 				const item = source.elements[index],
-					state = motionState(item, t);
+					state = richMotionState(source,item,t,motionState);
 				applyElementReveal(element, item, t);
 				element.style.opacity = state.opacity;
 				element.style.transform = `translate(${state.dx * bounds.width}px,${state.dy * bounds.height}px) scale(${state.scale})`;

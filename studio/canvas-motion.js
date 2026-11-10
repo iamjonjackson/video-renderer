@@ -12,7 +12,7 @@ function trackState(a, time, exit = false) {
 	p = easeProgress(p, a.easing);
 	state.opacity = exit
 		? 1 - p
-		: ["words", "wipe", "characters", "chart-draw"].includes(a.effect)
+		: ["words", "wipe", "characters", "chart-draw", "path-draw", "chunks"].includes(a.effect)
 			? 1
 			: p;
 	if (a.effect === "scale")
@@ -62,14 +62,16 @@ function revealProgress(item, time) {
 	if (
 		time === null ||
 		!a ||
-		!["words", "wipe", "characters", "chart-draw"].includes(a.effect)
+		!["words", "wipe", "characters", "chart-draw", "path-draw", "chunks"].includes(a.effect)
 	)
 		return 1;
 	const p = Math.max(0, Math.min(1, (time - a.start) / a.duration));
-	return easeProgress(p, a.easing);
+	return a.effect==='chunks'?1:easeProgress(p, a.easing);
 }
 function applyElementReveal(node, item, time) {
-	const effect = item.animation?.effect,
+	if(item.type==='path')drawCanvasPath(node,item,time===null?1:revealProgress(item,time));
+ if(item.type==='text'&&item.animation?.effect==='chunks'){drawTextChunks(node,item,time);return;}
+ const effect = item.animation?.effect,
 		p = revealProgress(item, time);
 	node.style.maskImage =
 		effect === "wipe" && time !== null
@@ -133,7 +135,7 @@ function applyCanvasTime(time) {
 		const state =
 			time === null
 				? { opacity: 1, dx: 0, dy: 0, scale: 1 }
-				: motionState(item, time);
+				: richMotionState(currentScene(),item,time,motionState);
 		applyElementReveal(node, item, time);
 		node.style.opacity = state.opacity;
 		node.style.transform = `translate(${state.dx * bounds.width}px,${state.dy * bounds.height}px) scale(${state.scale})`;
@@ -188,10 +190,10 @@ function syncMotionControls() {
 	for (const option of $("animation-effect").options)
 		option.disabled =
 			(exit &&
-				["words", "wipe", "characters", "chart-draw"].includes(option.value)) ||
+				["words", "wipe", "characters", "chart-draw", "path-draw", "chunks"].includes(option.value)) ||
 			(["words", "characters"].includes(option.value) &&
 				itemById()?.type !== "text") ||
-			(option.value === "chart-draw" && itemById()?.type !== "chart");
+			(option.value === "chart-draw" && itemById()?.type !== "chart") || (option.value=== "path-draw" && itemById()?.type!=="path") || (option.value=== "chunks" && itemById()?.type!=="text");
 }
 $("animation-phase").onchange = syncMotionControls;
 $("animation-save").onclick = async () => {
@@ -322,7 +324,7 @@ $("transition-preview").onclick = () => {
 		[...node.querySelectorAll(".thumbnail-element")].forEach(
 			(element, index) => {
 				const item = scene.elements[index],
-					state = motionState(item, time);
+					state = richMotionState(scene,item,time,motionState);
 				applyElementReveal(element, item, time);
 				element.style.opacity = state.opacity;
 				element.style.transform = `translate(${state.dx * r.width}px,${state.dy * r.height}px) scale(${state.scale})`;

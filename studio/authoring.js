@@ -80,7 +80,7 @@ for (const id of [
 	"template",
 	"brief-title",
 	"brief",
-	"key-points", "brief-audience", "brief-motion", "brief-chart-data", "brief-style", "brief-motion-style",
+	"key-points", "brief-audience", "brief-motion", "brief-chart-data", "brief-style", "brief-motion-style", "generation-mode", "generation-provider", "cloud-consent", "cloud-images", "cloud-critique", "cloud-repair",
 ])
 	$(id).addEventListener("input", clearCandidate);
 $("replace-consent").onchange = () => {
@@ -101,10 +101,11 @@ $("draft").onclick = async () => {
         if(description.length<20 || description.length>3000)throw new Error("Describe your video in 20–3000 characters.");
         const points=$("key-points").value.split("\n").map(p=>p.trim()).filter(Boolean);
         if(points.length>6 || points.some(p=>p.length>180))throw new Error("Use up to 6 key points, each at most 180 characters.");
-        const setup=await request("/api/ai-setup");if(revision!==draftRevision || $("composer").hidden)return;if(setup.status!=="ready")throw new Error("Enable local AI in the setup panel first.");
+        if($("generation-mode").value==="local"){const setup=await request("/api/ai-setup");if(revision!==draftRevision || $("composer").hidden)return;if(setup.status!=="ready")throw new Error("Enable local AI in the setup panel first.");}
         const {parseChartData}=await import("/ai-visuals.mjs");
         const chartData=parseChartData($("brief-chart-data").value);
-        let generated=await generateLocally({title,description,points,chartData,designStyle:$("brief-style").value,motionStyle:$("brief-motion-style").value,asset:suppliedAsset,structure:$("template").value,audience:$("brief-audience").value.trim(),motion:$("brief-motion").checked,resolution:project.meta?.resolution||{width:1920,height:1080}});
+        if(revision!==draftRevision||$("composer").hidden)return;
+        let generated=await ($("generation-mode").value==="hosted"?generateHosted:generateLocally)({title,description,points,chartData,designStyle:$("brief-style").value,motionStyle:$("brief-motion-style").value,asset:suppliedAsset,structure:$("template").value,audience:$("brief-audience").value.trim(),motion:$("brief-motion").checked,resolution:project.meta?.resolution||{width:1920,height:1080}});
         if(revision!==draftRevision || $("composer").hidden)return;
         generated=await fitGeneratedText(generated);
         const {spec}=await request("/api/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(generated)});
@@ -138,6 +139,7 @@ $("output-format").onchange = () => {
 };
 
 function cancelGeneration(){
+ if(typeof cancelHostedGeneration==="function")cancelHostedGeneration();
  if(pendingGeneration){aiWorker?.terminate();aiWorker=null;pendingGeneration.reject(new Error('Generation cancelled.'));pendingGeneration=null;}
  drafting=false;$("draft").disabled=false;$("cancel-draft").hidden=true;
 }
@@ -160,7 +162,7 @@ $('cancel-draft').onclick=()=>{clearCandidate();$('composer-status').textContent
 
 let setupTimer=null;
 async function refreshAISetup(){
- try{const state=await request('/api/ai-setup');if(state.manifest)$('setup-model').textContent=`${state.manifest.model} · ${Math.round(state.manifest.installed_bytes/1000000)} MB installed. No vision model required.`;$('setup-status').textContent=state.warning || state.error || (state.status==='ready'?'Local AI ready — verified offline.':`${state.status}: ${Math.round(state.bytes_downloaded/1024/1024)} MB downloaded`);$('setup-start').hidden=['ready','downloading','verifying'].includes(state.status);$('setup-cancel').hidden=!['downloading','verifying'].includes(state.status);$('draft').disabled=drafting||state.status!=='ready';
+ try{const state=await request('/api/ai-setup');if(state.manifest)$('setup-model').textContent=`${state.manifest.model} · ${Math.round(state.manifest.installed_bytes/1000000)} MB installed. No vision model required.`;$('setup-status').textContent=state.warning || state.error || (state.status==='ready'?'Local AI ready — verified offline.':`${state.status}: ${Math.round(state.bytes_downloaded/1024/1024)} MB downloaded`);$('setup-start').hidden=['ready','downloading','verifying'].includes(state.status);$('setup-cancel').hidden=!['downloading','verifying'].includes(state.status);$('draft').disabled=drafting||($('generation-mode').value==='local'&&state.status!=='ready');
  if(['downloading','verifying'].includes(state.status)){setupTimer=setTimeout(refreshAISetup,500);}
  }catch(error){$('setup-status').textContent=error.message;}
 }

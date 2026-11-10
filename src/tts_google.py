@@ -8,6 +8,7 @@ into a WAV here. Both are handled, so the model can be swapped freely.
 
 Stdlib only (urllib + wave), mirroring tts.py.
 """
+
 import base64
 import io
 import json
@@ -17,7 +18,10 @@ from pathlib import Path
 from urllib import request as _rq
 from urllib.error import HTTPError, URLError
 
-from tts import TTSError, require_key
+if __package__:
+    from .tts import TTSError, require_key
+else:
+    from tts import TTSError, require_key
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -38,9 +42,10 @@ _LEGACY_MODEL = re.compile(r"^gemini-(2\.|3\.[0-5](?!\d))")
 
 def get_api_key() -> str:
     return require_key(
-        "GOOGLE_API_KEY", "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
         hint="Create a free key at https://aistudio.google.com/apikey and "
-             "export it; never paste it in chat.",
+        "export it; never paste it in chat.",
     )
 
 
@@ -52,6 +57,7 @@ def build_payload(text: str, model: str, voice: str, style: str) -> dict:
     """generateContent body for single-speaker narration."""
     # prebuiltVoiceConfig.voiceName works on every generation for prebuilt voices.
     speech_config = {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}}
+    part: dict[str, str | dict[str, str]]
     if is_legacy_model(model):
         part = {"text": f"{style}: {text}" if style else text}
     else:
@@ -119,8 +125,10 @@ def _extract_audio(body: dict) -> tuple[bytes, str]:
         fb = body.get("promptFeedback") or {}
         cand = (body.get("candidates") or [{}])[0]
         reason = fb.get("blockReason") or cand.get("finishReason") or ""
-    raise TTSError(f"Google TTS returned no audio{f' ({reason})' if reason else ''}; "
-                   f"keys: {list(body) if isinstance(body, dict) else type(body).__name__}")
+    raise TTSError(
+        f"Google TTS returned no audio{f' ({reason})' if reason else ''}; "
+        f"keys: {list(body) if isinstance(body, dict) else type(body).__name__}"
+    )
 
 
 def _is_model_missing(err: TTSError) -> bool:
@@ -138,8 +146,13 @@ def _is_voice_rejected(err: TTSError) -> bool:
     return " 400" in msg and "voice" in msg
 
 
-def synth_to_file(text: str, out_path: str, voice: str | None = None,
-                  model: str | None = None, style: str | None = None) -> str:
+def synth_to_file(
+    text: str,
+    out_path: str,
+    voice: str | None = None,
+    model: str | None = None,
+    style: str | None = None,
+) -> str:
     """Synthesize `text` to a WAV at `out_path`; return the path."""
     get_api_key()  # fail fast (TTSKeyMissing) before any request
     voice = voice or DEFAULT_VOICE
@@ -151,7 +164,9 @@ def synth_to_file(text: str, out_path: str, voice: str | None = None,
             body = _post(m, build_payload(text, m, voice, style))
         except TTSError as e:
             if voice != DEFAULT_VOICE and _is_voice_rejected(e):
-                print(f"[warn] Google voice '{voice}' rejected, falling back to '{DEFAULT_VOICE}'")
+                print(
+                    f"[warn] Google voice '{voice}' rejected, falling back to '{DEFAULT_VOICE}'"
+                )
                 voice = DEFAULT_VOICE
                 body = _post(m, build_payload(text, m, voice, style))
             elif not model and (_is_model_missing(e) or _is_rate_limited(e)):
@@ -166,4 +181,6 @@ def synth_to_file(text: str, out_path: str, voice: str | None = None,
         Path(out_path).write_bytes(to_wav_bytes(audio, mime))
         print(f"[voice] google '{voice}' via {m}")
         return str(out_path)
-    raise TTSError(f"No usable Google TTS model (tried: {models}). Last error: {last_err}")
+    raise TTSError(
+        f"No usable Google TTS model (tried: {models}). Last error: {last_err}"
+    )

@@ -486,7 +486,7 @@ function drawCanvas() {
 			node.style.fontWeight = item.bold ? "700" : "400";
  node.style.fontFamily=`"${canvasFontNames[item.font_family||"sans"]}"`;
 			node.style.textAlign = item.align || "left";
-		} else if(item.type==="image"){drawCanvasImage(node,item);} else if (item.type === "shape") {
+		} else if(item.type==="path"){canvas.append(node);drawCanvasPath(node,item);} else if(item.type==="image"){drawCanvasImage(node,item);} else if (item.type === "shape") {
 			node.style.background = item.color;
 			styleShape(node,item);
 		} else if(item.type==="icon"){node.append(canvasIcon(item.icon));node.classList.add("canvas-icon");}else drawChart(node, item);
@@ -605,7 +605,7 @@ function drawChart(node,item,progress=1){
   if(count<N-1&&part>0)shown.push([points[count][0]+(points[count+1][0]-points[count][0])*part,points[count][1]+(points[count+1][1]-points[count][1])*part]);
   if(shown.length>1){const path='M'+shown.map(v=>v.join(',')).join(' L');if(item.chart_type==='area')create('path',{d:path+` L${shown.at(-1)[0]},${baseline} L50,${baseline} Z`,fill:item.color,opacity:.22});create('path',{d:path,fill:'none',stroke:item.color,'stroke-width':3,'stroke-linecap':'round','stroke-linejoin':'round'});}
   points.forEach(([x,y],i)=>create('circle',{cx:x,cy:y,r:5*(p===1?1:Math.max(0,Math.min(1,(p-i/segments)/.12))),fill:item.color}));
- }else item.values.forEach((v,i)=>{const height=Math.abs(v)/span*160*p;if(item.chart_type==='horizontal')create('rect',{x:100+(Math.min(0,v*p)-low)/span*280,y:10+i*180/N,width:Math.abs(v)/span*280*p,height:130/N,fill:item.color});else create('rect',{x:35+i*330/N,y:v>=0?baseline-height:baseline,width:220/N,height,fill:item.color});});
+ }else item.values.forEach((v,i)=>{const seriesP=chartSeriesProgress(item,i,p),height=Math.abs(v)/span*160*seriesP;if(item.chart_type==='horizontal')create('rect',{x:100+(Math.min(0,v*seriesP)-low)/span*280,y:10+i*180/N,width:Math.abs(v)/span*280*seriesP,height:130/N,fill:item.color});else create('rect',{x:35+i*330/N,y:v>=0?baseline-height:baseline,width:220/N,height,fill:item.color});});
  item.labels.forEach((label,i)=>{const text=create('text',{x:item.chart_type==='horizontal'?5:35+i*330/N,y:item.chart_type==='horizontal'?30+i*180/N:222,fill:item.color,'font-size':13});text.textContent=label;});
  node.replaceChildren(svg);
 }
@@ -961,7 +961,8 @@ document.addEventListener("visibilitychange", () => {
 function finishInlineEditing() {
 	if (!inlineEditing) return;
 	const { node, item } = inlineEditing;
-	item.text = node.innerText.replace(/\r/g, "").slice(0, 600);
+	if(item.chunks){delete item.chunks;if(item.animation?.effect==='chunks')delete item.animation;}
+ item.text = node.innerText.replace(/\r/g, "").slice(0, 600);
 	inlineEditing = null;
 	node.contentEditable = "false";
 	node.classList.remove("typing");
@@ -997,7 +998,8 @@ function beginInlineEditing(item) {
 	node.setAttribute("aria-label", "Edit canvas text");
 	node.spellcheck = true;
 	node.oninput = () => {
-		item.text = node.innerText.replace(/\r/g, "").slice(0, 600);
+		if(item.chunks){delete item.chunks;if(item.animation?.effect==='chunks')delete item.animation;}
+ item.text = node.innerText.replace(/\r/g, "").slice(0, 600);
 		save();
 	};
 	node.onblur = finishInlineEditing;
@@ -1199,7 +1201,7 @@ $("content-save").onclick = async () => {
 			item.values = $("chart-values")
 				.value.split("\n")
 				.map((v) => (v.trim() === "" ? null : Number(v)));
-		} else item.text = $("content-text").value;
+		} else {if(item.chunks){delete item.chunks;if(item.animation?.effect==='chunks')delete item.animation;}item.text = $("content-text").value;}
 	}
 	try {
 		await request("/api/validate", {
@@ -1269,3 +1271,5 @@ $('add-icon').onclick=()=>{
  convertScene();if(currentScene().elements.length>=16){notice('A canvas supports at most 16 elements.');return;}
  const item={id:crypto.randomUUID(),type:'icon',icon:'star',x:.1,y:.1,w:.12,h:.18,color:'#bba5ff'};currentScene().elements.push(item);selectedElement=item.id;update();showElementOptions();
 };
+
+$('add-path').onclick=()=>{convertScene();if(currentScene().elements.length>=16){notice('Use at most 16 elements.');return;}const item={id:'path-'+crypto.randomUUID(),type:'path',points:[[.05,.80],[.30,.30],[.60,.55],[.95,.10]],stroke_width:.015,x:.1,y:.3,w:.8,h:.3,color:'#bba5ff'};currentScene().elements.push(item);selectedElement=item.id;save();drawCanvas();};

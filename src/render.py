@@ -380,17 +380,25 @@ def _ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def _export_pptx(spec, scene_artifacts, output):
+def _export_pptx(spec, scene_artifacts, output, source_pptx=None):
+    """build slides normally, or refresh narration in a supplied edited deck"""
     try:
         import pptx_export
         pptx_path = str(Path(output).with_suffix(".pptx"))
-        pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
+        if source_pptx:
+            # retain the edited charts instead of rebuilding them from the spec palette
+            pptx_export.refresh_narration(source_pptx, scene_artifacts, pptx_path)
+        else:
+            pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
         print(f"[done] {pptx_path} ({len(scene_artifacts)} slides)")
     except Exception as e:
+        if source_pptx:
+            raise
         print(f"[warn] pptx export failed: {e}")
 
 
-def render(spec_path: str, output: str, workdir: str | None = None):
+def render(spec_path: str, output: str, workdir: str | None = None, *, source_pptx=None):
+    """render the timeline and optionally retain an edited deck's native charts"""
     spec = load_spec(spec_path)
     theme = spec["theme"]
     voice_cfg = spec.get("voice", {})
@@ -423,6 +431,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
             else:
                 raise
 
+        if source_pptx and (scene.get("narration") or scene.get("narration_per_bullet")) and not audio_path:
+            raise RuntimeError(f"Slide {i + 1} needs narration before an edited deck can be rerendered")
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)
         clip = apply_anim(clip, scene.get("anim", "fade"), dur)
@@ -471,7 +481,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         # Concatenate segments with the ffmpeg concat demuxer (O(1) memory;
         # MoviePy re-reading 31 segment files OOMs). Identical codecs/params
         # make stream copy safe.
-        seg_files = sorted(seg_dir.glob("seg_*.mp4"))
+        # a reused cache may contain segments from a longer, older render
+        seg_files = [seg_dir / f"seg_{i:03d}.mp4" for i in range(len(spec["timeline"]))]
         concat_list = seg_dir / "concat.txt"
         concat_list.write_text("".join("file '" + str(p.resolve()) + "'\n" for p in seg_files))
         ffmpeg = _ffmpeg_exe()
@@ -481,7 +492,11 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         # Mux narration: one pass with all audio offsets as inputs
         if audios:
             mixed = workdir / "narration_all.wav"
-            CompositeAudioClip(audios).write_audiofile(str(mixed), logger=None)
+            narration = CompositeAudioClip(audios)
+            if source_pptx:
+                # keep the complete edited presentation, including its silent tail or outro
+                narration = narration.with_duration(t_cursor)
+            narration.write_audiofile(str(mixed), logger=None)
             tmp = str(Path(output).with_suffix(".mux.mp4"))
             subprocess.run([ffmpeg, "-y", "-loglevel", "error",
                            "-i", output, "-i", str(mixed),
@@ -490,7 +505,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
                            "-shortest", tmp], check=True)
             Path(tmp).replace(output)
         print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps, streamed)")
-        _export_pptx(spec, scene_artifacts, output)
+        _export_pptx(spec, scene_artifacts, output, source_pptx)
         return
 
     final = concatenate_videoclips(video_clips, method="compose")
@@ -500,7 +515,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
                           audio_codec="aac", logger=None)
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
 
-    _export_pptx(spec, scene_artifacts, output)
+    _export_pptx(spec, scene_artifacts, output, source_pptx)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+{
+  "label": "Deterministic fixtures; NOT a live generation comparison",
+  "fixtures": [
+    {"id":"tutorial","brief_id":"accessibility-explainer","text":["Clear labels explain each field","Every control works with a keyboard","Errors explain the problem and the fix","Focus remains visible"],"expected_rejection":"unknown source IDs"},
+    {"id":"comparison","brief":{"title":"Compare shared and personal plans","description":"Shared plans show ownership. Personal plans keep individual notes. Neither option is a measured winner.","points":["Shared plans show ownership","Personal plans keep individual notes","Neither option is a measured winner"],"structure":"comparison","motion":true,"resolution":{"width":1080,"height":1920}},"text":["Shared plans show ownership","Personal plans keep individual notes","Neither option is a measured winner"],"expected_rejection":"invented protected numbers"},
+    {"id":"long-token","brief":{"title":"Review long identifiers","description":"A long identifier must remain readable without clipping. Review the identifier before publishing.","points":["IdentifierIdentifierIdentifierIdentifierIdentifierIdentifierIdentifierIdentifierIdentifierIdentifier"],"motion":false,"resolution":{"width":1920,"height":1080}},"text":["IdentifierIdentifierIdentifierIdentifierIdentifierIdentifierIdentifierIdentifierIdentifierIdentifier","Review the identifier","Avoid clipped text"],"expected_rejection":"unbreakable text exceeds its box"},
+    {"id":"data","brief_id":"numeric-data-story","chartData":{"labels":["Week 1","Week 2","Week 3"],"values":[12,18,15]},"text":["Week 1: 12 requests","Week 2: 18 requests","Week 3: 15 requests","Cause is unknown; these are counts, not percentages"],"expected_rejection":"changed protected chart values"},
+    {"id":"image","brief_id":"grounded-product-pitch","text":["One shared task view","An owner and next action for each task","Weekly review of blocked work","Proposed trial for the next event"],"supplied_image":true,"expected_rejection":"generated image bytes"}
+  ]
+}

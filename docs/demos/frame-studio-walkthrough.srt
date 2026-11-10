@@ -1,0 +1,79 @@
+1
+00:00:00,000 --> 00:00:06,449
+01 · Frame Studio
+Real local application. Silent walkthrough with chapter captions; no paid API calls.
+
+2
+00:00:06,449 --> 00:00:10,994
+02 · Storyboard and templates
+Select, add and reorder editable scenes; JSON remains the production document.
+
+3
+00:00:10,994 --> 00:00:28,103
+03 · Typography and canvas editing
+Type directly, choose offline fonts, move and resize elements, then undo and redo.
+
+4
+00:00:28,103 --> 00:00:50,467
+04 · Shapes and vector library
+Native editable shapes and 18 original vector symbols; not generated photographs.
+
+5
+00:00:50,467 --> 00:01:06,573
+05 · Supplied images
+Import a local PNG; cover crops centrally and contain preserves the whole asset.
+
+6
+00:01:06,573 --> 00:01:37,820
+06 · Charts and verified data
+Edit real labels and values, then switch among six chart types.
+
+7
+00:01:37,820 --> 00:01:57,036
+07 · Animated data story
+Load a purpose-built authored demo, then inspect line tracing, slice filling and typography.
+
+8
+00:01:57,036 --> 00:02:19,962
+08 · Element motion and pacing
+Four coordinated motion characters, individual easing, intensity, start and duration.
+
+9
+00:02:19,962 --> 00:02:41,219
+09 · Full project playback
+One master clock, scene transitions, pause/resume, speed and backwards scrubbing.
+
+10
+00:02:41,219 --> 00:03:01,912
+10 · Paths, groups and semantic chunks
+Advanced JSON tracks are validated; grouped motion and reveals share preview/export timing.
+
+11
+00:03:01,912 --> 00:03:18,868
+11 · Backgrounds, notes and aspect ratios
+Choose scene treatment, narration notes and portrait/square/landscape output.
+
+12
+00:03:18,868 --> 00:03:55,997
+12 · Local AI generation
+Actual offline Qwen generation: grounded content, art direction and timed-shot planning.
+
+13
+00:03:55,997 --> 00:04:12,664
+13 · Hosted generation and optional stages
+Controls only: provider configuration, disclosure, images, vision critique and one bounded repair. No API call submitted.
+
+14
+00:04:12,664 --> 00:04:48,417
+14 · Exports and narration safeguards
+Actually export a static editable deck and silent MP4. Hosted narration requires separate configuration and consent.
+
+15
+00:04:48,417 --> 00:04:59,892
+15 · Regeneration, persistence and mobile
+Hosted shot regeneration requires a configured provider; JSON export preserves the project. Mobile controls use the same editor.
+
+16
+00:04:59,892 --> 00:05:04,608
+16 · Walkthrough complete
+Local features and real exports shown. Cloud generation, image generation and narration need separate live verification.

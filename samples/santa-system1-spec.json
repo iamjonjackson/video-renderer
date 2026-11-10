@@ -1,0 +1,98 @@
+{
+  "meta": {
+    "title": "A System 1 Proposal for Santa",
+    "fps": 30
+  },
+  "theme": {
+    "preset": "dark",
+    "accent": "#e63946"
+  },
+  "voice": {
+    "slug": "gb_jane_curious"
+  },
+  "timeline": [
+    {
+      "type": "title",
+      "text": "Dear Santa,",
+      "subtitle": "A System 1 proposal for Naughty-or-Nice at scale",
+      "anim": "zoom-in",
+      "narration": "Dear Santa. Your judgement system is ancient. Let's upgrade it."
+    },
+    {
+      "type": "bullets",
+      "heading": "The December Problem",
+      "items": [
+        "Two billion kids. One night.",
+        "Every child needs a verdict.",
+        "Even your gut is tired."
+      ],
+      "stagger": 0.35,
+      "narration": "Two billion children. One night. Every single one needs a verdict. Even your gut, Santa, is tired."
+    },
+    {
+      "type": "bullets",
+      "heading": "Enter System 1",
+      "items": [
+        "Fast, intuitive, pattern-matching",
+        "Like your elves \u2014 but instant",
+        "Think Kahneman, not Skynet"
+      ],
+      "stagger": 0.35,
+      "narration": "System 1, from Kahneman: fast, intuitive, pattern-matching. Like your elves, but instant. Think snap judgement, not Skynet.",
+      "image": {
+        "prompt": "minimal isometric illustration of a cozy santa workshop with a glowing neural network diagram floating above the workbench, candy cane and warm firelight palette, deep blue background, clean flat vector style",
+        "placement": "right",
+        "style": "isometric"
+      }
+    },
+    {
+      "type": "chart",
+      "chart_type": "bar",
+      "heading": "Judgements per minute",
+      "labels": [
+        "Your list",
+        "The elves",
+        "System 1 model"
+      ],
+      "values": [
+        3,
+        40,
+        5000
+      ],
+      "y_label": "Verdicts / min",
+      "narration": "Right now you manage three per minute. The elves hit forty. A trained System 1 model? Five thousand. Easily."
+    },
+    {
+      "type": "bullets",
+      "heading": "Pop culture approved",
+      "items": [
+        "Moneyball \u2014 for mischief",
+        "Minority Report \u2014 cookie-coded",
+        "The Good Place \u2014 but with ops"
+      ],
+      "stagger": 0.35,
+      "narration": "It is Moneyball for mischief. Minority Report, but cookie-coded. The Good Place scoring system, finally with operations."
+    },
+    {
+      "type": "chart",
+      "chart_type": "line",
+      "heading": "Projected deliveries per hour",
+      "labels": [
+        "2023",
+        "2024",
+        "2025 (with System 1)"
+      ],
+      "values": [
+        100,
+        130,
+        240
+      ],
+      "narration": "Deploy this year, and deliveries per hour jump one hundred and forty percent. Mrs. Claus will be thrilled."
+    },
+    {
+      "type": "outro",
+      "text": "Ho ho ho. Ship it.",
+      "narration": "Ho ho ho, Santa. Ship it."
+    }
+  ]
+}

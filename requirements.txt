@@ -1,0 +1,5 @@
+imageio-ffmpeg
+matplotlib
+moviepy
+pillow
+python-pptx

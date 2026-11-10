@@ -227,3 +227,6 @@ temp/*
 !temp/.gitkeep
 output/*
 !output/.gitkeep
+
+# Pinned local browser model/runtime assets; restored by setup script
+studio/ai-assets/

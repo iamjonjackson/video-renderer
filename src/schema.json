@@ -22,12 +22,139 @@
       "type": "object",
       "properties": {
         "preset": { "type": "string", "enum": ["dark", "light"], "default": "dark" },
+        "color_scheme": { "enum": ["red", "orange", "yellow", "green", "blue", "purple", "pink", "white", "grey"], "description": "Whole-video colours for backgrounds, panels, text, charts and generated branding; takes precedence over preset" },
+        "surface": { "type": "string", "description": "Panel and caption background, hex" },
+        "secondary": { "type": "string", "description": "Secondary accent, hex" },
+        "chart_colors": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "chart_text": { "type": "string", "description": "Text inside pie slices, hex" },
         "bg": { "type": "string", "description": "Background color, hex like #0d1117" },
         "fg": { "type": "string", "description": "Foreground/text color, hex" },
         "accent": { "type": "string", "description": "Accent color, hex" },
         "font_size": { "type": "integer", "default": 64 },
         "title_font_size": { "type": "integer", "default": 96 }
       }
+    },
+    "branding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "logo": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Image path relative to the spec file; PNG alpha is preserved"
+        },
+        "position": {
+          "enum": [
+            "top-left",
+            "top-right",
+            "bottom-left",
+            "bottom-right"
+          ],
+          "default": "bottom-right"
+        },
+        "margin": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 0.5,
+          "default": 0.03,
+          "description": "Inset as a fraction of each frame dimension, rounded to pixels (minimum 1px)"
+        },
+        "max_height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "default": 0.1,
+          "description": "Maximum logo height as a fraction of frame height; aspect ratio preserved, no upscaling, also constrained to the inset canvas"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.85
+        },
+        "scenes": {
+          "default": "all",
+          "oneOf": [
+            {
+              "const": "all"
+            },
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "title",
+                  "bullets",
+                  "image",
+                  "chart",
+                  "outro"
+                ]
+              }
+            }
+          ]
+        },
+        "generated": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
+            },
+            "tagline": {
+              "type": "string",
+              "maxLength": 48,
+              "pattern": "^[^\\r\\n]*$"
+            },
+            "style": {
+              "enum": [
+                "orbit",
+                "spark",
+                "petal"
+              ],
+              "default": "orbit"
+            },
+            "palette": {
+              "enum": ["red", "orange", "yellow", "green", "blue", "purple", "pink", "white", "grey"],
+              "description": "Optional logo-only override; otherwise inherits theme.color_scheme, or blue if no scheme is set"
+            },
+            "colors": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "primary": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-fA-F]{6}$"
+                },
+                "secondary": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-fA-F]{6}$"
+                },
+                "text": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-fA-F]{6}$"
+                }
+              }
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "logo"
+          ]
+        },
+        {
+          "required": [
+            "generated"
+          ]
+        }
+      ]
     },
     "voice": {
       "type": "object",

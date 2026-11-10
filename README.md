@@ -92,12 +92,123 @@ by construction) with the image in a bordered panel.
 
 See `samples/sample-spec.json` for a complete example.
 
+### Whole-video colour schemes
+
+Pick one colour for the entire video:
+
+```json
+"theme": { "color_scheme": "purple" }
+```
+
+Options: **red, orange, yellow, green, blue, purple, pink, white, grey**.
+Each scheme coordinates the slide background, content boxes, headings,
+body text, caption panels, image borders, chart fills and labels, and
+any generated branding. White uses a light canvas; the other schemes use
+subtly tinted dark backgrounds with lighter accents. Charts retain direct
+category/value labels rather than relying on colour alone. The same
+resolved colours are used in the editable PPTX export.
+
+The built-in solid colour pairs are tested against WCAG contrast thresholds:
+[text at least 4.5:1](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html),
+[meaningful chart fills at least 3:1 against the background](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html),
+and pie percentages at least 4.5:1 against their slice. Schemed image
+backgrounds put text on a solid panel; captions also use opaque panels.
+These checks cover the curated colours at full scene visibility, rather
+than arbitrary photos, logo opacity, transitions, or custom overrides.
+
+`color_scheme` takes precedence over `preset`. Existing `dark` and `light`
+presets still work when it is omitted. Explicit hex overrides such as `bg`,
+`fg`, `accent`, `surface`, and `secondary` take precedence over a scheme;
+custom overrides need their own contrast checks. Supplied PNGs and photos
+retain their original colours.
+
+See [the nine colour schemes](docs/evidence/branding/color-schemes.png).
+
+### Branding overlay
+
+Add an optional top-level `branding` block to place a logo over the video:
+
+```json
+"branding": {
+  "logo": "assets/logo.png",
+  "position": "bottom-right",
+  "margin": 0.03,
+  "max_height": 0.1,
+  "opacity": 0.85,
+  "scenes": "all"
+}
+```
+
+Logo paths are relative to the spec file (absolute paths also work). PNG
+transparency is preserved and multiplied by `opacity` (0–1). `position`
+accepts `top-left`, `top-right`, `bottom-left`, or `bottom-right`.
+`margin` is a fraction of each frame dimension, greater than 0 and less
+than 0.5; the default 0.03 gives 58px horizontally and 32px vertically at
+1920×1080, with a minimum inset of 1px. `max_height` is a fraction of frame
+height (default 0.1, or 108px); logos retain their aspect ratio, never
+upscale, and shrink further if needed to fit within the margins.
+
+Use `"scenes": ["title", "outro"]` to brand only those scene types, or `[]`
+to disable it. Omitted options use the defaults shown above. The logo stays
+fixed above scene animations throughout each selected scene. Omit `branding`
+to keep the existing rendering unchanged. This overlay applies to the MP4;
+the editable PPTX export is unchanged.
+
+#### Generate a brand from the spec
+
+Instead of supplying a PNG, use `generated` to build a transparent symbol
+and wordmark locally. The result is deterministic and needs no API key:
+
+```json
+"branding": {
+  "generated": {
+    "name": "Video Render",
+    "style": "orbit"
+  },
+  "position": "bottom-right",
+  "margin": 0.04,
+  "max_height": 0.12,
+  "opacity": 1,
+  "scenes": "all"
+}
+```
+
+Choose `orbit` (orbital rings and a satellite), `spark` (layered starburst),
+or `petal` (four petals with a transparent centre). The default is `orbit`.
+`name` is required (up to 32 characters); `tagline` is optional (up to 48).
+Both must fit on a single line. Longer wordmarks scale down to fit the frame.
+
+Generated branding automatically inherits `theme.color_scheme`. Without a
+scheme it defaults to blue. For a logo-only override, `generated.palette`
+accepts the same nine colour names; normally leave it out so the whole
+video stays coordinated. Exact logo overrides are optional via
+`generated.colors`, using `primary`, `secondary`, and `text` as `#RRGGBB`.
+
+Supply exactly one of `logo` or `generated`. All placement, opacity, scale,
+and scene-filter options work with either source.
+
+Try `python3 src/render.py samples/branding-spec.json -o output/branding.mp4`.
+This is the same five-slide quarterly review as `samples/sample-spec.json`:
+wording, chart data, narration, voice, scene order, timing and image prompts
+are retained. Only the logo settings and theme colours differ. Both specs
+use `samples/.render_cache`, so existing narration and AI images are reused.
+Uncached narration and images still need their usual API credentials.
+
+To brand another presentation, keep its `timeline`, `voice` and `meta`
+unchanged and edit only `branding` and theme colours. Adding branding does
+not rewrite scripts or split narration. Existing output videos must be
+rendered again to show the visual changes.
+
+See [all styles and palettes](docs/evidence/branding/brand-options.png).
+The colour/placement evidence scripts use separate synthetic test slides;
+their wording is not used to replace the presentation being branded.
+
 ## Files
 
 - `src/render.py` — spec → MP4 renderer (MoviePy + Matplotlib)
 - `src/tts.py` — Mistral Voxtral TTS REST client (`/v1/audio/speech`)
 - `src/schema.json` — JSON Schema for the spec
-- `src/themes/presets.py` — dark/light color presets
+- `src/themes/presets.py` — whole-video colour schemes and dark/light presets
 - `demos/` — rendered example videos from `samples/sample-spec.json`
 
 ## Notes

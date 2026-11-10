@@ -1,0 +1,84 @@
+{
+  "meta": {
+    "title": "Demo",
+    "resolution": {
+      "width": 1920,
+      "height": 1080
+    },
+    "fps": 30
+  },
+  "theme": {
+    "preset": "dark",
+    "color_scheme": "purple"
+  },
+  "timeline": [
+    {
+      "type": "title",
+      "text": "Quarterly Review",
+      "subtitle": "Q3 Highlights",
+      "anim": "zoom-in",
+      "narration": "Welcome to the quarterly review. Here are the highlights from Q3."
+    },
+    {
+      "type": "bullets",
+      "heading": "Key Wins",
+      "items": [
+        "Revenue up 24%",
+        "Churn down 3 points",
+        "Two new enterprise clients"
+      ],
+      "stagger": 0.5,
+      "narration": "Revenue grew twenty four percent, churn fell three points, and we closed two new enterprise accounts."
+    },
+    {
+      "type": "chart",
+      "chart_type": "bar",
+      "heading": "Monthly Recurring Revenue ($k)",
+      "labels": [
+        "Jul",
+        "Aug",
+        "Sep"
+      ],
+      "values": [
+        410,
+        455,
+        512
+      ],
+      "narration": "Monthly recurring revenue climbed from four hundred ten thousand in July to five hundred twelve thousand in September."
+    },
+    {
+      "type": "bullets",
+      "heading": "Looking Ahead",
+      "items": [
+        "Product launch in October",
+        "Two new markets",
+        "Hiring in engineering"
+      ],
+      "narration": "Looking ahead, we launch the new product in October, enter two new markets, and continue hiring in engineering.",
+      "image": {
+        "prompt": "minimal isometric illustration of a rocket launch over a city skyline, deep blue palette with coral accents, clean flat vector style",
+        "placement": "right",
+        "style": "isometric"
+      }
+    },
+    {
+      "type": "outro",
+      "text": "Thank you",
+      "duration": 2.5
+    }
+  ],
+  "voice": {
+    "slug": "gb_jane_neutral"
+  },
+  "branding": {
+    "generated": {
+      "name": "Video Render",
+      "style": "orbit"
+    },
+    "position": "bottom-right",
+    "margin": 0.04,
+    "max_height": 0.12,
+    "opacity": 1,
+    "scenes": "all"
+  }
+}

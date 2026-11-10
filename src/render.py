@@ -9,6 +9,7 @@ length + padding), unless an explicit `duration` overrides them.
 import argparse
 import hashlib
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent / "themes"))
 import images as imggen
 import tts
 import presets
+import branding as brandgen
 
 ANIM_IN = 0.6
 SLIDE_DIST = 120
@@ -55,13 +57,80 @@ def _resolve_font(bold: bool = False) -> str:
 
 def load_spec(path: str) -> dict:
     spec = json.loads(Path(path).read_text())
-    theme = dict(presets.__dict__[spec.get("theme", {}).get("preset", "dark")])
-    theme.update({k: v for k, v in spec.get("theme", {}).items() if k != "preset"})
+    theme = presets.resolve_theme(spec.get("theme", {}))
     spec["theme"] = theme
     spec.setdefault("meta", {})
     spec["meta"].setdefault("resolution", {"width": 1920, "height": 1080})
     spec["meta"].setdefault("fps", 30)
+    if "branding" in spec:
+        validate_branding(spec["branding"])
+        if "logo" in spec["branding"]:
+            logo = Path(spec["branding"]["logo"])
+            if not logo.is_absolute():
+                spec["branding"]["logo"] = str(Path(path).resolve().parent / logo)
     return spec
+
+
+def validate_branding(branding):
+    """Reject invalid overlay geometry before starting an expensive render."""
+    if not isinstance(branding, dict):
+        raise ValueError("branding must be an object")
+    if ("logo" in branding) == ("generated" in branding):
+        raise ValueError("branding requires exactly one of logo or generated")
+    if "generated" in branding:
+        brandgen.validate_generated(branding["generated"])
+    elif not isinstance(branding["logo"], str) or not branding["logo"]:
+        raise ValueError("branding.logo must be a nonempty image path")
+    if branding.get("position", "bottom-right") not in (
+            "top-left", "top-right", "bottom-left", "bottom-right"):
+        raise ValueError("branding.position must name one of the four corners")
+    for key, default, low, high in (
+            ("margin", 0.03, 0, 0.5), ("max_height", 0.1, 0, 1),
+            ("opacity", 0.85, 0, 1)):
+        value = branding.get(key, default)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or not low <= value <= high
+                or (key != "opacity" and value == 0)
+                or (key == "margin" and value == 0.5)):
+            raise ValueError(f"Invalid branding.{key}: {value!r}")
+    scenes = branding.get("scenes", "all")
+    if scenes != "all" and not (
+            isinstance(scenes, list)
+            and all(isinstance(s, str) and s in BUILDERS for s in scenes)):
+        raise ValueError("branding.scenes must be 'all' or a list of scene types")
+
+
+def apply_branding(clip, branding, scene_type, theme=None):
+    """Overlay an alpha-aware logo after animation; absent branding is a no-op."""
+    if branding is None:
+        return clip
+    scenes = branding.get("scenes", "all")
+    if scenes != "all" and scene_type not in scenes:
+        return clip
+    margin = branding.get("margin", 0.03)
+    mx = min((W - 1) // 2, max(1, round(W * margin)))
+    my = min((H - 1) // 2, max(1, round(H * margin)))
+    generated = branding.get("generated", {})
+    if theme and "color_scheme" in theme and "palette" not in generated:
+        generated = {**generated, "colors": {
+            "primary": theme["accent"], "secondary": theme["secondary"], "text": theme["fg"],
+            **generated.get("colors", {})}}
+    source = (brandgen.generated_logo(json.dumps(generated, sort_keys=True),
+                                     _resolve_font(True))
+              if "generated" in branding else branding["logo"])
+    logo = ImageClip(source, transparent=True)
+    # Preserve aspect ratio, never upscale, and fit even very wide logos
+    # within the inset canvas. Keep at least one pixel in each dimension.
+    scale = min(1, H * branding.get("max_height", 0.1) / logo.h,
+                (W - 2 * mx) / logo.w, (H - 2 * my) / logo.h)
+    width, height = max(1, int(logo.w * scale)), max(1, int(logo.h * scale))
+    logo = logo.resized((width, height))
+    position = branding.get("position", "bottom-right")
+    x = mx if position.endswith("left") else W - mx - logo.w
+    y = my if position.startswith("top") else H - my - logo.h
+    logo = logo.with_opacity(branding.get("opacity", 0.85)) \
+        .with_position((x, y)).with_duration(clip.duration)
+    return CompositeVideoClip([clip, logo], size=(W, H)).with_duration(clip.duration)
 
 
 def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
@@ -181,6 +250,12 @@ def composite_bg_image(clips, scene, theme, img_path):
         bg_img = bg_img.cropped(x_center=bg_img.w / 2, y_center=bg_img.h / 2,
                                 width=W, height=H)
     bg_img = bg_img.with_opacity(opacity).with_position((0, 0))
+    if "color_scheme" in theme:
+        # Text gets a known solid colour rather than depending on the
+        # average brightness of an arbitrary generated background image.
+        text_panel = ColorClip((int(W * .9), int(H * .8)), color=rgb(theme["surface"])) \
+            .with_position((int(W * .05), int(H * .1)))
+        return [clips[0], bg_img, text_panel] + clips[1:]
     scrim, passes = imggen.scrim_for_contrast(
         img_path, theme["fg"], theme["bg"],
         text_area=(0.5, 0.5, 0.7, 0.4),
@@ -267,6 +342,10 @@ def build_bullets(scene, theme, workdir=None):
             clips = composite_bg_image(clips, scene, theme, img_path)
     max_w = 0.5 if panel_clips else 0.7
     x = int(W * (text_x_frac - max_w / 2))
+    if "color_scheme" in theme:
+        clips.append(ColorClip((int(W * max_w) + 64, int(H * .60)),
+                               color=rgb(theme["surface"]))
+                     .with_position((x - 32, int(H * .26))))
     if scene.get("heading"):
         h_size = int(theme["font_size"] * 0.8)
         heading = _left_text_clip(scene["heading"], theme, h_size,
@@ -299,7 +378,9 @@ def build_image(scene, theme, workdir):
         cap_h = int(H * 0.12)
         cap = centered_text_clip(scene["caption"], theme,
                                  int(theme["font_size"] * 0.5), y_frac=0.92)
-        cap_bg = ColorClip(size=(W, cap_h), color=(0, 0, 0)).with_opacity(0.6)
+        cap_bg = (ColorClip(size=(W, cap_h), color=rgb(theme["surface"]))
+                  if "color_scheme" in theme else
+                  ColorClip(size=(W, cap_h), color=(0, 0, 0)).with_opacity(0.6))
         cap_bg = cap_bg.with_position((0, H - cap_h))
         clips.extend([cap_bg, cap])
     return CompositeVideoClip(clips, size=(W, H))
@@ -308,20 +389,32 @@ def build_image(scene, theme, workdir):
 def build_chart(scene, theme, workdir):
     fig, ax = plt.subplots(figsize=(19.2, 10.8), dpi=100)
     fig.patch.set_facecolor(theme["bg"])
-    ax.set_facecolor(theme["bg"])
+    ax.set_facecolor(theme.get("surface", theme["bg"]))
     ax.tick_params(colors=theme["fg"], labelsize=18)
     for spine in ax.spines.values():
         spine.set_color(theme["fg"])
-    if scene.get("chart_type", "bar") == "bar":
+    chart_type = scene.get("chart_type", "bar")
+    if chart_type == "bar":
         bars = ax.bar(scene["labels"], scene["values"],
-                      color=theme["accent"], width=0.55)
-    elif scene["chart_type"] == "line":
+                      color=theme.get("chart_colors", theme["accent"]), width=0.55)
+        if "color_scheme" in theme:
+            ax.bar_label(bars, color=theme["fg"], fontsize=18, padding=6)
+            ax.margins(y=.15)
+    elif chart_type == "line":
         ax.plot(scene["labels"], scene["values"], color=theme["accent"],
                 linewidth=4, marker="o", markersize=10)
     else:
-        ax.pie(scene["values"], labels=scene["labels"], colors=[theme["accent"], theme["fg"], "#888"],
-               textprops={"color": theme["fg"], "fontsize": 18}, autopct="%1.0f%%")
-    if scene["chart_type"] != "pie":
+        if "color_scheme" in theme:
+            wedges, labels, percentages = ax.pie(
+                scene["values"], labels=scene["labels"], colors=theme["chart_colors"],
+                textprops={"color": theme["fg"], "fontsize": 18}, autopct="%1.0f%%",
+                wedgeprops={"edgecolor": theme["bg"], "linewidth": 3})
+            for percentage in percentages:
+                percentage.set_color(theme["chart_text"])
+        else:
+            ax.pie(scene["values"], labels=scene["labels"], colors=[theme["accent"], theme["fg"], "#888"],
+                   textprops={"color": theme["fg"], "fontsize": 18}, autopct="%1.0f%%")
+    if chart_type != "pie":
         if scene.get("y_label"):
             ax.set_ylabel(scene["y_label"], color=theme["fg"], fontsize=20)
         ax.set_title(scene.get("heading", ""), color=theme["fg"],
@@ -339,7 +432,9 @@ def build_chart(scene, theme, workdir):
     x = (W - img.w) // 2
     y = (H - img.h) // 2
     img = img.with_position((x, y))
-    return CompositeVideoClip([img], size=(W, H))
+    clips = ([ColorClip((W, H), color=rgb(theme["bg"])), img]
+             if "color_scheme" in theme else [img])
+    return CompositeVideoClip(clips, size=(W, H))
 
 
 def build_outro(scene, theme):
@@ -437,6 +532,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))
 
+        clip = apply_branding(clip, spec.get("branding"), stype, theme)
+
         # Bound memory on long timelines: render each scene straight to a
         # disk segment and release it, instead of holding every composite.
         if stream:
@@ -448,6 +545,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
             video_clips.append(clip)
 
         art = {}
+        if stype == "image" and "color_scheme" in theme:
+            art["image_png"] = scene["src"]
         if audio_path:
             art["narration_path"] = audio_path
         img_path = scene_image_clip(scene, theme, workdir) if scene.get("image") else None

@@ -92,6 +92,93 @@ by construction) with the image in a bordered panel.
 
 See `samples/sample-spec.json` for a complete example.
 
+### Rerender after editing charts or wording in PowerPoint
+
+The optional rerender command reads a saved deck back into a **new** spec,
+generates narration for changed chart data or slide wording, and creates a new
+MP4 and PPTX. The edited PowerPoint and original spec are left untouched.
+Saving PowerPoint alone does not run this command automatically.
+
+1. Open a deck exported by this renderer, edit its native charts or wording,
+   then save the workbook (if edited) and PowerPoint. Keep the original slide
+   count, order and text boxes; edit the wording inside the existing boxes.
+2. Run the command with the **original** spec and the edited deck:
+
+   ```bash
+   python3 scripts/rerender_from_pptx.py samples/sample-spec.json output/edited-review.pptx -o output/revised-review.mp4
+   ```
+
+3. Open `output/revised-review.json`, `.mp4`, and `.pptx`. The chart labels,
+   values, titles, optional axis title, and supported chart types are imported.
+   For example, changed values become narration such as
+   `Revenue. Dollars. Jul: 410. Sep: 650.` No trend or explanation is invented.
+   Titles, subtitles, bullet headings/items and image captions are imported too.
+   A wording change replaces that slide's whole narration with a readout of its
+   revised visible text, including previously silent slides. It does not rewrite
+   an explanatory script or infer extra information. Unchanged slides retain
+   their existing narration, including per-bullet narration and silence.
+   Existing output filenames are refused, so choose
+   a new stem for each version.
+
+The new PPTX retains the edited native charts and formatting. Its narration
+is replaced with fresh audio rather than appended as another track. The
+video uses rendered images of chart slides and slides with wording edits,
+preserving their saved formatting. Other video scenes still use their original
+spec. New, deleted or emptied text boxes cannot be matched safely and produce
+a clear error; arbitrary added text boxes, grouped text and text inside images
+are not imported. The ordinary `src/render.py` path is unchanged.
+The generated JSON stores the updated data and narration; custom chart
+styling remains in the PPTX. Running `src/render.py` on that JSON alone
+redraws charts using the spec palette. Use the rerender command with the
+matching JSON/PPTX pair for later revisions that need the saved styling.
+
+Automatic slide rendering requires **LibreOffice** and the optional Python
+package **PyMuPDF**. For example, on macOS:
+
+```bash
+brew install --cask libreoffice
+python3 -m pip install pymupdf
+```
+
+LibreOffice renders charts using its own fonts/layout engine, so font
+substitution may differ from PowerPoint. To use PowerPoint's own appearance,
+export the edited deck as PNGs in PowerPoint, choosing **every slide**, then
+provide that folder instead. Keep the exported names `Slide1.png`,
+`Slide2.png`, etc, and re-export after each edit:
+
+```bash
+python3 scripts/rerender_from_pptx.py samples/sample-spec.json output/edited-review.pptx -o output/revised-review.mp4 --slides-dir output/edited-review-slides
+```
+
+This PNG route requires neither LibreOffice nor PyMuPDF. Visible elements
+in those exported slides appear in the video too. Video animations
+still come from the spec; PowerPoint animations are not imported.
+
+To preview only the updated JSON and narration without converting slides,
+rendering video, or making API calls:
+
+```bash
+python3 scripts/rerender_from_pptx.py samples/sample-spec.json output/edited-review.pptx -o output/chart-preview.mp4 --spec-only
+```
+
+The rerender reuses the original spec's `.render_cache` by default;
+`--workdir` can select another cache. When using a generated JSON from
+`output/` for a later revision, pass `--workdir samples/.render_cache` to
+keep using the original sample cache. New narration uses the existing TTS
+configuration and credentials. Missing narration stops this workflow rather
+than leaving a silent video or retaining speech about old values. Partial
+outputs are staged privately and published only after rendering succeeds.
+Blank data, multiple series, unsupported chart types, unrelated or multiple
+audio tracks, and detected slide reordering are rejected. Older decks without scene markers rely on the
+original slide order. An existing PNG chart remains a picture and cannot
+supply editable data.
+
+Run all native-chart and rerender checks without API calls:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
 ## Files
 
 - `src/render.py` — spec → MP4 renderer (MoviePy + Matplotlib)

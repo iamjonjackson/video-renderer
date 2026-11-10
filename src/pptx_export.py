@@ -28,6 +28,7 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
     bg = _rgb(theme.get("bg", "#0d1117"))
     fg = _rgb(theme.get("fg", "#f0f6fc"))
     accent = _rgb(theme.get("accent", "#58a6ff"))
+    surface = _rgb(theme.get("surface", theme.get("bg", "#0d1117")))
 
     prs = Presentation()
     prs.slide_width = SLIDE_W
@@ -47,6 +48,12 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
             box.fill.fore_color.rgb = bg
             box.fill.transparency = 1.0 - scrim  # pptx: transparency of the fill
             box.line.fill.background()
+            if "color_scheme" in theme:
+                panel = slide.shapes.add_shape(1, int(SLIDE_W*.05), int(SLIDE_H*.1),
+                                               int(SLIDE_W*.9), int(SLIDE_H*.8))
+                panel.fill.solid()
+                panel.fill.fore_color.rgb = surface
+                panel.line.fill.background()
         else:
             box = slide.shapes.add_shape(1, 0, 0, SLIDE_W, SLIDE_H)
             box.fill.solid()
@@ -87,6 +94,9 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 hr.font.color.rgb = accent
             bb = slide.shapes.add_textbox(tx, Inches(1.9), text_w,
                                           SLIDE_H - Inches(2.6))
+            if "color_scheme" in theme:
+                bb.fill.solid()
+                bb.fill.fore_color.rgb = surface
             btf = bb.text_frame
             for i, item in enumerate(scene.get("items", [])):
                 p = btf.paragraphs[0] if i == 0 else btf.add_paragraph()
@@ -97,6 +107,12 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 r.font.color.rgb = fg
                 p.space_after = Pt(12)
             if has_panel:
+                if "color_scheme" in theme:
+                    border = slide.shapes.add_shape(
+                        1, SLIDE_W - Inches(5.43), Inches(1.17), Inches(4.86), Inches(4.86))
+                    border.fill.solid()
+                    border.fill.fore_color.rgb = accent
+                    border.line.fill.background()
                 slide.shapes.add_picture(
                     art["image_png"],
                     left=SLIDE_W - Inches(5.4), top=Inches(1.2),
@@ -115,6 +131,9 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 cb = slide.shapes.add_textbox(
                     Inches(1), SLIDE_H - Inches(1.1),
                     SLIDE_W - Inches(2), Inches(0.7))
+                if "color_scheme" in theme:
+                    cb.fill.solid()
+                    cb.fill.fore_color.rgb = surface
                 cp = cb.text_frame.paragraphs[0]
                 cp.alignment = PP_ALIGN.CENTER
                 cr = cp.add_run()

@@ -1,0 +1,58 @@
+{
+  "meta": {
+    "fps": 24
+  },
+  "theme": {
+    "color_scheme": "purple"
+  },
+  "branding": {
+    "generated": {
+      "name": "Video Render",
+      "style": "orbit"
+    },
+    "position": "bottom-right",
+    "margin": 0.04,
+    "max_height": 0.12,
+    "opacity": 1,
+    "scenes": "all"
+  },
+  "timeline": [
+    {
+      "type": "title",
+      "text": "Ideas in motion",
+      "subtitle": "One colour choice for the whole video",
+      "duration": 3
+    },
+    {
+      "type": "bullets",
+      "heading": "Make it yours",
+      "items": [
+        "Choose a colour scheme for every slide",
+        "Backgrounds, panels, text and charts stay coordinated",
+        "The generated logo inherits your chosen colours"
+      ],
+      "duration": 3
+    },
+    {
+      "type": "chart",
+      "chart_type": "bar",
+      "heading": "Progress together",
+      "labels": [
+        "Explore",
+        "Create",
+        "Share"
+      ],
+      "values": [
+        42,
+        65,
+        84
+      ],
+      "duration": 3
+    },
+    {
+      "type": "outro",
+      "text": "Keep exploring",
+      "duration": 3
+    }
+  ]
+}

@@ -140,12 +140,25 @@
     },
     "timeline": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "$ref": "#/definitions/scene"
       }
     }
   },
   "definitions": {
+    "sceneImage": {
+      "type": "object",
+      "description": "Optional AI-generated image for title, bullets, chart and outro scenes",
+      "properties": {
+        "prompt": { "type": "string", "description": "Image generation prompt; the image is skipped with a warning if omitted" },
+        "placement": { "enum": ["background", "left", "right"], "default": "background", "description": "background (faded, behind text) or left/right (spotlight panel beside text)" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.25, "description": "Background placement only: image fade level" },
+        "style": { "type": "string", "description": "Free-form style note kept with the prompt" },
+        "model": { "type": "string", "description": "Optional agent model override" }
+      },
+      "additionalProperties": false
+    },
     "scene": {
       "type": "object",
       "oneOf": [
@@ -212,6 +225,12 @@
           "type": "number",
           "default": 1.0,
           "description": "Extra seconds after narration ends (minimum tail buffer)"
+        },
+        "image": {
+          "$ref": "#/definitions/sceneImage"
+        },
+        "transition": {
+          "type": "string"
         }
       },
       "required": [
@@ -249,6 +268,17 @@
             "type": "string"
           },
           "description": "One TTS clip per bullet, each bullet reveals as its audio starts"
+        },
+        "anim": {
+          "enum": [
+            "fade",
+            "slide-up",
+            "zoom-in"
+          ],
+          "default": "fade"
+        },
+        "image": {
+          "$ref": "#/definitions/sceneImage"
         },
         "duration": {
           "type": "number"
@@ -315,6 +345,8 @@
         "values": { "type": "array", "items": { "type": "number" } },
         "y_label": { "type": "string" },
         "pptx_chart": { "enum": ["native", "image"], "default": "native", "description": "PPTX export only: editable PowerPoint chart, or the matplotlib PNG used in the video" },
+        "anim": { "enum": ["fade", "slide-up", "zoom-in"], "default": "fade" },
+        "image": { "$ref": "#/definitions/sceneImage" },
         "narration": { "type": "string" },
         "duration": { "type": "number" },
         "padding": { "type": "number", "default": 1.0 },
@@ -334,6 +366,17 @@
         },
         "text": {
           "type": "string"
+        },
+        "anim": {
+          "enum": [
+            "fade",
+            "slide-up",
+            "zoom-in"
+          ],
+          "default": "fade"
+        },
+        "image": {
+          "$ref": "#/definitions/sceneImage"
         },
         "narration": {
           "type": "string"

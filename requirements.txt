@@ -3,3 +3,4 @@ matplotlib
 moviepy
 pillow
 python-pptx
+jsonschema

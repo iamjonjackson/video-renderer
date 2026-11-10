@@ -2,6 +2,10 @@
 
 Usage:
     python3 render.py spec.json [-o output.mp4] [--workdir /tmp/renders] [--pptx-only]
+    python3 render.py spec.json --validate   # check only; exit 0 valid, 1 invalid
+
+Specs are validated against schema.json before any rendering starts; every
+problem is reported at once, numbered by scene from 1.
 
 Scene durations are audio-driven when `narration` is present (duration = audio
 length + padding), unless an explicit `duration` overrides them.
@@ -39,6 +43,7 @@ import presets
 
 import composition
 import images as imggen
+import spec_validation
 import tts
 
 ANIM_IN = 0.6
@@ -80,7 +85,13 @@ def _resolve_font(bold: bool = False) -> str:
 
 
 def load_spec(path: str) -> dict:
-    spec = json.loads(Path(path).read_text())
+    """Read, validate and theme-merge a spec.
+
+    Raises SpecValidationError listing every problem before any rendering
+    work starts; validation runs on the raw JSON, ahead of preset lookup.
+    """
+    spec = spec_validation.read_spec(path)
+    spec_validation.validate_spec(spec, path)
     theme = dict(presets.__dict__[spec.get("theme", {}).get("preset", "dark")])
     theme.update({k: v for k, v in spec.get("theme", {}).items() if k != "preset"})
     spec["theme"] = theme
@@ -663,7 +674,7 @@ def render_pptx_only(spec: dict, output: str, workdir: Path):
         dur = scene_duration(scene, audio_dur)
         scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
         print(
-            f"[scene {i}] {scene['type']}: {dur:.2f}s starting at {t_cursor:.2f}s"
+            f"[scene {i + 1}] {scene['type']}: {dur:.2f}s starting at {t_cursor:.2f}s"
             + (f" (narration {audio_dur:.2f}s)" if audio_path else "")
         )
         t_cursor += dur
@@ -754,7 +765,7 @@ def render(
         scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
 
         print(
-            f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
+            f"[scene {i + 1}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
             + (f" (narration {audio_dur:.2f}s)" if audio_path else "")
         )
         t_cursor += dur
@@ -839,6 +850,20 @@ if __name__ == "__main__":
         action="store_true",
         help="write only the .pptx (narration, images, charts); skip video encoding",
     )
+    p.add_argument(
+        "--validate",
+        action="store_true",
+        help="only check the spec against src/schema.json; exit 0 if valid, 1 if not",
+    )
     args = p.parse_args()
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    render(args.spec, args.output, args.workdir, render_video=not args.pptx_only)
+    try:
+        if args.validate:
+            spec = load_spec(args.spec)
+            n = len(spec["timeline"])
+            print(f"{args.spec}: OK ({n} scene{'s' if n != 1 else ''})")
+            sys.exit(0)
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        render(args.spec, args.output, args.workdir, render_video=not args.pptx_only)
+    except spec_validation.SpecValidationError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)

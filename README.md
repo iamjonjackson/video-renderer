@@ -278,7 +278,19 @@ by construction) with the image in a bordered panel.
 - **Voice** (Mistral): built-in voice slugs (list via `GET /v1/audio/voices`)
   or a cloned `voice_id` from a 2–3s audio sample. Other providers take their
   voice from `meta.tts` — see [Narration providers](#narration-providers).
-- Full contract: `src/schema.json` (JSON Schema).
+- Full contract: `src/schema.json` (JSON Schema). Every spec is validated
+  against it before rendering starts, and all problems are listed at once,
+  numbered by scene from 1, with no traceback:
+
+  ```text
+  my-spec.json: found 2 problems:
+    - scene 2: unknown type 'bullet', did you mean 'bullets'?
+    - scene 4: missing required field 'text'
+  ```
+
+  To check a spec without rendering (e.g. in CI), run
+  `python3 src/render.py my-spec.json --validate`. It exits 0 if the spec is
+  valid and 1 if not.
 
 See `samples/sample-spec.json` for a complete example.
 

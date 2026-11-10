@@ -1,0 +1,8 @@
+{
+  "timeline": [
+    { "type": "title", "text": "Quarterly Review" },
+    { "type": "bullet", "items": ["Revenue up"] },
+    { "type": "chart", "labels": ["Jul", "Aug"], "values": [410, "455"], "hedaing": "Sales" },
+    { "type": "outro" }
+  ]
+}

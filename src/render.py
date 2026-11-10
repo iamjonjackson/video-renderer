@@ -44,6 +44,7 @@ import tts
 
 ANIM_IN = 0.6
 SLIDE_DIST = 120
+BULLET_FADE = 0.3  # seconds each bullet takes to fade in (issue #5)
 W, H = 1920, 1080
 
 
@@ -103,24 +104,31 @@ def synth_narration(
     if not texts:
         return None, 0.0
     paths = []
+    provider = voice_cfg.get("provider", tts.DEFAULT_PROVIDER)
+    fmt = voice_cfg.get("format", "wav")
     for i, text in enumerate(texts):
-        h = hashlib.sha1(text.encode()).hexdigest()[:10]
-        out = workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'wav')}"
+        # Key covers provider + voice + model, so switching providers (or
+        # voices) regenerates instead of replaying another provider's audio.
+        out = workdir / f"narr_{provider}_{tts.cache_key(text, voice_cfg)}_{i}.{fmt}"
         if not out.exists():
+            tmp = out.with_name(out.stem + ".part" + out.suffix)
             tts.synth_to_file(
                 text,
-                str(out),
+                str(tmp),
                 voice_slug=voice_cfg.get("slug"),
                 voice_id=voice_cfg.get("voice_id"),
-                model=voice_cfg.get("model", "voxtral-mini-tts-2603"),
-                fmt=voice_cfg.get("format", "wav"),
+                model=voice_cfg.get("model"),
+                fmt=fmt,
+                provider=provider,
+                style=voice_cfg.get("style"),
             )
+            tmp.replace(out)  # never leave a half-written clip in the cache
         paths.append(str(out))
     if len(paths) == 1:
         return paths[0], tts.audio_duration(paths[0])
     combined = (
         workdir
-        / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
+        / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{fmt}"
     )
     if not combined.exists():
         merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
@@ -352,10 +360,18 @@ def build_bullets(scene, theme, workdir=None):
     b_size = int(theme["font_size"] * 0.55)
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
+    stagger = scene.get("stagger", 0.4)
     for i, item in enumerate(scene["items"]):
         bullet = _left_text_clip("• " + item, theme, b_size, max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
-        clips.append(bullet.with_position((x, y)))
+        bullet = bullet.with_position((x, y))
+        if stagger > 0:
+            if bullet.mask is None:
+                bullet = bullet.with_mask()
+            bullet = bullet.with_mask(bullet.mask.with_effects([vfx.FadeIn(BULLET_FADE)]))
+            bullet = bullet.with_start(i * stagger)
+        clips.append(bullet)
+
     return CompositeVideoClip(clips, size=(W, H))
 
 
@@ -499,17 +515,37 @@ def _export_pptx(spec, scene_artifacts, output, strict: bool = False):
         print(f"[warn] pptx export failed: {e}")
 
 
+def narration_config(spec: dict) -> dict | None:
+    """Resolve TTS settings once per render; None (all scenes silent) on a
+    bad provider setting, matching the missing-key degradation."""
+    try:
+        cfg = tts.resolve_config(spec)
+    except tts.TTSError as e:
+        print(f"[warn] {e} — rendering without narration")
+        return None
+    if cfg["provider"] != tts.DEFAULT_PROVIDER:
+        print(f"[tts] narration provider: {cfg['provider']}")
+    return cfg
+
+
 def scene_narration(
-    scene: dict, i: int, workdir: Path, voice_cfg: dict
+    scene: dict, i: int, workdir: Path, voice_cfg: dict | None
 ) -> tuple[str | None, float]:
-    """synth_narration, degrading to a silent scene when no API key is set."""
+    """synth_narration, degrading to a silent scene when the provider's API
+    key is unset or the provider fails (any tts.TTSError)."""
+    if voice_cfg is None:
+        return None, 0.0
     try:
         return synth_narration(scene, workdir, voice_cfg)
-    except RuntimeError as e:
-        if "MISTRAL_API_KEY" in str(e):
-            print(f"[warn] {e} — rendering scene {i} without narration")
-            return None, 0.0
-        raise
+    except tts.TTSKeyMissing as e:
+        print(f"[warn] {e} — rendering scene {i} without narration")
+        return None, 0.0
+    except tts.TTSError as e:
+        print(
+            f"[warn] {voice_cfg.get('provider')} TTS failed: {e} — "
+            f"rendering scene {i} without narration"
+        )
+        return None, 0.0
 
 
 def collect_artifacts(
@@ -555,7 +591,7 @@ def render_pptx_only(spec: dict, output: str, workdir: Path):
     """Build the deck from narration, chart and image artifacts alone: no
     clips, segments or MP4."""
     theme = spec["theme"]
-    voice_cfg = spec.get("voice", {})
+    voice_cfg = narration_config(spec)
     scene_artifacts = []
     t_cursor = 0.0
     for i, scene in enumerate(spec["timeline"]):
@@ -579,7 +615,7 @@ def render(
         raise ValueError("At least one export must be requested.")
     spec = load_spec(spec_path)
     theme = spec["theme"]
-    voice_cfg = spec.get("voice", {})
+    voice_cfg = narration_config(spec)
     resolution = spec["meta"]["resolution"]
     width, height = resolution["width"], resolution["height"]
     if (width, height) not in composition.RESOLUTIONS:

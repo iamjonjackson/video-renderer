@@ -1,5 +1,5 @@
 """Build a .pptx from the render artifacts: one slide per scene, with each
-scene's narration WAV embedded on its slide.
+scene's narration clip (WAV or MP3) embedded on its slide.
 
 Built from the individual artifacts (spec, narration clips, chart PNGs,
 generated scene images) — never from the rendered video. Chart scenes become
@@ -7,6 +7,7 @@ native, editable PowerPoint charts; the chart PNG is the fallback.
 """
 
 import wave
+from pathlib import Path
 
 from lxml import etree
 from pptx import Presentation
@@ -42,16 +43,29 @@ _AUTOPLAY_SEQ = (
 )
 
 
-def _wav_ms(path: str) -> int:
-    with wave.open(path) as w:
-        return max(1, round(w.getnframes() * 1000 / w.getframerate()))
+_AUDIO_MIME = {".wav": "audio/wav", ".mp3": "audio/mpeg"}
+
+
+def _audio_mime(path: str) -> str:
+    """MIME type for embedded narration (WAV from Mistral/Google, MP3 from ElevenLabs)."""
+    return _AUDIO_MIME.get(Path(path).suffix.lower(), "audio/wav")
+
+
+def _audio_ms(path: str) -> int:
+    if Path(path).suffix.lower() == ".wav":
+        with wave.open(path) as w:
+            return max(1, round(w.getnframes() * 1000 / w.getframerate()))
+    from moviepy import AudioFileClip  # compressed formats: decode like the video path
+
+    with AudioFileClip(path) as clip:
+        return max(1, round(clip.duration * 1000))
 
 
 def _autoplay(slide, media_shape, audio_path: str):
     """Start the slide's narration when the slide opens."""
     root = slide._element.find(qn("p:timing")).find(".//" + qn("p:childTnLst"))
     seq = etree.fromstring(
-        _AUTOPLAY_SEQ.format(dur=_wav_ms(audio_path), spid=media_shape.shape_id)
+        _AUTOPLAY_SEQ.format(dur=_audio_ms(audio_path), spid=media_shape.shape_id)
     )
     root.insert(0, seq)
     # Keep cTn ids unique: the media node python-pptx created follows the sequence.
@@ -196,6 +210,29 @@ def _add_chart_scene(slide, scene: dict, art: dict, theme: dict):
         slide.shapes.add_picture(art["chart_png"], left=x, top=y, width=cx, height=cy)
 
 
+def _notes_text(scene: dict, art: dict) -> str:
+    """Speaker notes for a scene's slide: its narration text, or "" if it has none.
+
+    narration_per_bullet becomes one numbered line per bullet. When the
+    narration audio is a WAV, its length is added so presenters know the pacing.
+    """
+    per_bullet = scene.get("narration_per_bullet")
+    if per_bullet:
+        lines = [f"{i + 1}. {text}" for i, text in enumerate(per_bullet)]
+    elif scene.get("narration"):
+        lines = [scene["narration"]]
+    else:
+        return ""
+    audio = art.get("narration_path")
+    if audio and str(audio).lower().endswith(".wav"):
+        try:
+            with wave.open(str(audio)) as w:
+                lines.append(f"(Narration: {w.getnframes() / w.getframerate():.1f}s)")
+        except (wave.Error, EOFError, OSError):
+            pass  # the length is a nicety; never fail the export over it
+    return "\n".join(lines)
+
+
 def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
     """scene_artifacts: per-scene dicts with optional keys
     narration_path, chart_png, image_png, bg_image_png, scrim (0-1)."""
@@ -238,7 +275,7 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                     top=prs.slide_height - Inches(0.8),
                     width=Inches(0.6),
                     height=Inches(0.6),
-                    mime_type="audio/wav",
+                    mime_type=_audio_mime(art["narration_path"]),
                 )
                 _autoplay(slide, media, art["narration_path"])
             continue
@@ -340,7 +377,7 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 width=Inches(0.8),
                 height=Inches(0.8),
                 poster_frame_image=None,
-                mime_type="audio/wav",
+                mime_type=_audio_mime(art["narration_path"]),
             )
             _autoplay(slide, media, art["narration_path"])
 
@@ -360,6 +397,13 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                         for run in paragraph.runs:
                             if run.font.size is not None:
                                 run.font.size = Emu(round(run.font.size * scale))
+
+        # speaker notes: the narration text (#7). Added last, so the slide's own
+        # shapes, media and relationship ids are exactly as before; the notes
+        # page is only created when there is text.
+        notes = _notes_text(scene, art)
+        if notes:
+            slide.notes_slide.notes_text_frame.text = notes
 
     prs.save(output_path)
     return output_path

@@ -28,6 +28,34 @@
         "fps": {
           "type": "integer",
           "default": 30
+        },
+        "tts": {
+          "type": "object",
+          "description": "Narration provider settings. The TTS_PROVIDER env var overrides 'provider'; the other fields only apply when the effective provider matches 'provider' (mistral if omitted).",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "mistral",
+                "google",
+                "elevenlabs"
+              ],
+              "default": "mistral"
+            },
+            "voice": {
+              "type": "string",
+              "description": "Provider voice: Mistral slug, Gemini prebuilt voice name (e.g. Kore, Charon) or ElevenLabs voice_id"
+            },
+            "model": {
+              "type": "string",
+              "description": "Provider model id, e.g. gemini-3.8-flash-lite-tts or eleven_multilingual_v2"
+            },
+            "style": {
+              "type": "string",
+              "description": "Google only: delivery style, e.g. 'Read aloud in a neutral, warm narration voice'"
+            }
+          },
+          "additionalProperties": false
         }
       }
     },
@@ -69,7 +97,7 @@
       "properties": {
         "slug": {
           "type": "string",
-          "description": "Mistral TTS voice slug, e.g. en_jane_neutral"
+          "description": "Mistral TTS voice slug, e.g. en_jane_neutral (Mistral provider only; see meta.tts for others)"
         },
         "voice_id": {
           "type": "string",

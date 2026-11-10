@@ -1,9 +1,11 @@
 """Pixel-level overlay checks and shared render-path regression coverage."""
 import json
+import copy
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+import wave
 from unittest.mock import patch
 
 import numpy as np
@@ -141,6 +143,49 @@ class BrandingTests(unittest.TestCase):
                 render.validate_branding({"generated": invalid})
         with self.assertRaises(ValueError):
             render.validate_branding({"logo": str(self.logo), "generated": custom})
+
+    def test_branding_example_keeps_the_original_presentation_content(self):
+        root = Path(__file__).resolve().parents[1]
+        original = json.loads((root / "samples" / "sample-spec.json").read_text())
+        branded = json.loads((root / "samples" / "branding-spec.json").read_text())
+        # branding options must not introduce a different script or timeline
+        self.assertEqual({k: v for k, v in branded.items() if k not in ("branding", "theme")},
+                         {k: v for k, v in original.items() if k not in ("branding", "theme")})
+        self.assertEqual(len(branded["timeline"]), 5)
+        self.assertIn("branding", branded)
+        self.assertEqual(branded["theme"]["color_scheme"], "purple")
+
+    def test_colour_and_logo_changes_preserve_narration_and_reuse_cached_audio(self):
+        root = Path(__file__).resolve().parents[1]
+        spec = json.loads((root / "samples" / "sample-spec.json").read_text())
+        original = copy.deepcopy(spec)
+        path = self.root / "content.json"
+        def speech(text, output, **kwargs):
+            with wave.open(str(output), "wb") as audio:
+                audio.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+                audio.writeframes(b"\0\0" * 800)
+        with patch.object(render.tts, "synth_to_file", side_effect=speech) as synth:
+            path.write_text(json.dumps(spec))
+            baseline = render.load_spec(str(path))
+            tracks = [render.synth_narration(scene, self.root, baseline["voice"])
+                      for scene in baseline["timeline"]]
+            requests = synth.call_count
+            self.assertEqual(requests, 4)
+            for scheme in branding.PALETTES:
+                for corner in ("top-left", "bottom-right"):
+                    spec["theme"] = {"color_scheme": scheme}
+                    spec["branding"] = self.config(position=corner)
+                    path.write_text(json.dumps(spec))
+                    branded = render.load_spec(str(path))
+                    self.assertEqual(branded["timeline"], original["timeline"])
+                    self.assertEqual(branded["voice"], original["voice"])
+                    self.assertEqual(branded["meta"], original["meta"])
+                    for scene, original_scene, expected in zip(branded["timeline"], baseline["timeline"], tracks):
+                        track = render.synth_narration(scene, self.root, branded["voice"])
+                        self.assertEqual(track, expected)
+                        self.assertEqual(render.scene_duration(scene, track[1]),
+                                         render.scene_duration(original_scene, expected[1]))
+                    self.assertEqual(synth.call_count, requests)
 
     def test_render_integration_short_and_streamed_after_animation(self):
         # Capture frames at the encoder boundary, exercising the real scene

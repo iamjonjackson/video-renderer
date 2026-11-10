@@ -188,7 +188,20 @@ Supply exactly one of `logo` or `generated`. All placement, opacity, scale,
 and scene-filter options work with either source.
 
 Try `python3 src/render.py samples/branding-spec.json -o output/branding.mp4`.
+This is the same five-slide quarterly review as `samples/sample-spec.json`:
+wording, chart data, narration, voice, scene order, timing and image prompts
+are retained. Only the logo settings and theme colours differ. Both specs
+use `samples/.render_cache`, so existing narration and AI images are reused.
+Uncached narration and images still need their usual API credentials.
+
+To brand another presentation, keep its `timeline`, `voice` and `meta`
+unchanged and edit only `branding` and theme colours. Adding branding does
+not rewrite scripts or split narration. Existing output videos must be
+rendered again to show the visual changes.
+
 See [all styles and palettes](docs/evidence/branding/brand-options.png).
+The colour/placement evidence scripts use separate synthetic test slides;
+their wording is not used to replace the presentation being branded.
 
 ## Files
 

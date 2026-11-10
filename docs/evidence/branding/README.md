@@ -7,6 +7,12 @@ and filtering by scene type. Supply a PNG or generate a transparent
 wordmark and motif from a name, style, palette, and optional custom hex
 colours. See the main README and `samples/branding-spec.json` for the contract.
 
+The branding sample retains the full five-slide quarterly review, including
+its original wording, narration, voice, chart data, timings and image prompt.
+Only branding and theme colours differ from `samples/sample-spec.json`.
+The synthetic slides shown below are isolated visual test fixtures, not
+replacement scripts for an existing presentation.
+
 ## Whole-video colour schemes
 
 Set `"theme": {"color_scheme": "purple"}`. Options are red, orange, yellow,
@@ -69,13 +75,17 @@ and embed the screenshots in its Evidence section before review.
 .venv/bin/python scripts/theme_evidence.py
 ```
 
-- Fourteen tests pass: four-corner placement, exact pixel blending and unchanged
+- Sixteen tests pass: four-corner placement, exact pixel blending and unchanged
   pixels outside the logo, PNG alpha, opacity including zero, default
   sizing and positioning, maximum-height scaling and wide-logo fitting,
   scene filtering, input validation, and spec-relative logo paths. Generated
   marks are tested across all 27 style/palette combinations for transparent
   backgrounds, antialiasing, deterministic output, and distinct colours.
   Custom colour overrides and generated-spec loading are also covered.
+- Content regression checks compare the branded sample with the original
+  presentation and verify all nine colour schemes retain the script, voice,
+  metadata and timing while reusing the same cached narration without new
+  speech requests.
 - Theme tests cover all nine schemes, semantic contrast pairs, logo
   inheritance and overrides, legacy defaults, scene backgrounds, panels,
   captions, spotlight borders, background-image text surfaces, all three

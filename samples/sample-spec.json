@@ -28,7 +28,11 @@
         "Two new enterprise clients"
       ],
       "stagger": 0.5,
-      "narration": "Revenue grew twenty four percent, churn fell three points, and we closed two new enterprise accounts."
+      "narration_per_bullet": [
+        "Revenue grew twenty four percent this quarter.",
+        "Churn fell three points.",
+        "Two new enterprise clients joined."
+      ]
     },
     {
       "type": "chart",
@@ -54,12 +58,16 @@
         "Two new markets",
         "Hiring in engineering"
       ],
-      "narration": "Looking ahead, we launch the new product in October, enter two new markets, and continue hiring in engineering.",
       "image": {
         "prompt": "minimal isometric illustration of a rocket launch over a city skyline, deep blue palette with coral accents, clean flat vector style",
         "placement": "right",
         "style": "isometric"
-      }
+      },
+      "narration_per_bullet": [
+        "We launch the new product in October.",
+        "We enter two new markets.",
+        "We continue hiring in engineering."
+      ]
     },
     {
       "type": "outro",

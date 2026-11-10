@@ -79,7 +79,7 @@
         "type": { "const": "bullets" },
         "heading": { "type": "string" },
         "items": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "stagger": { "type": "number", "default": 0.4, "description": "Used in the default silent-scene duration; per-bullet narration uses decoded audio offsets" },
+        "stagger": { "type": "number", "minimum": 0, "default": 0.4, "description": "Fallback seconds between bullet reveals when per-bullet audio timings are unavailable; narration_per_bullet takes priority" },
         "narration": { "type": "string" },
         "narration_per_bullet": { "type": "array", "items": { "type": "string" }, "description": "One narration entry per item; each bullet fades in at its cumulative decoded audio start" },
         "duration": { "type": "number" },

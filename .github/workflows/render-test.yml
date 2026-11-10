@@ -20,7 +20,7 @@ jobs:
         run: |
           pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx
 
-      - name: Test narration-timed bullet reveals
+      - name: Test narration and stagger bullet reveals
         run: python3 -m unittest discover -s tests -p 'test_bullet_sync.py' -v
 
       - name: Render ${{ matrix.spec }}

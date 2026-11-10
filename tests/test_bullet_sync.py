@@ -14,6 +14,7 @@ from unittest.mock import patch
 import wave
 
 import numpy as np
+from PIL import Image
 from moviepy import ColorClip, VideoFileClip
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,18 +58,18 @@ class BulletSyncTests(unittest.TestCase):
             paths.append(output)
         return paths
 
-    def visible_bullets(self, frame):
+    def visible_bullets(self, frame, x_range=(0, 448)):
         """count text pixels in the three row bands, away from the heading"""
         visible, left_edges = [], []
         bg = np.array(render.rgb(self.theme["bg"]))
         for i in range(3):
             y = int(360 * (0.30 + i * (0.85 - 0.30) / 3))
-            band = frame[y:y + 50, :448]
+            band = frame[y:y + 50, x_range[0]:x_range[1]]
             mask = np.max(np.abs(band.astype(int) - bg), axis=2) > 45
             visible.append(np.count_nonzero(mask) > 12)
             xs = np.where(mask)[1]
             if len(xs):
-                left_edges.append(int(xs.min()))
+                left_edges.append(int(xs.min()) + x_range[0])
         return visible, left_edges
 
     def test_decoded_offsets_and_warm_cache(self):
@@ -111,14 +112,15 @@ class BulletSyncTests(unittest.TestCase):
         finally:
             clip.close()
 
-    def test_plain_narration_and_silent_scenes_keep_all_bullets_visible(self):
+    def test_plain_narration_and_silent_scenes_use_stagger(self):
         for narration in ({}, {"narration": "One clip for the whole scene"}):
             scene = {key: value for key, value in self.scene.items() if key != "narration_per_bullet"}
             scene.update(narration)
-            clip = render.build_bullets(scene, self.theme).with_duration(4)
+            scene["stagger"] = 0.4
+            clip = render.build_bullets(scene, self.theme, duration=4).with_duration(4)
             try:
-                for t in (0, 0.2, 1.8):
-                    self.assertEqual(self.visible_bullets(clip.get_frame(t))[0], [True, True, True])
+                for t, count in ((0.2, 1), (0.6, 2), (1.0, 3), (3.9, 3)):
+                    self.assertEqual(self.visible_bullets(clip.get_frame(t))[0], [i < count for i in range(3)])
             finally:
                 clip.close()
 
@@ -131,20 +133,102 @@ class BulletSyncTests(unittest.TestCase):
         self.assertEqual(starts, [0])
         self.assertEqual(render.scene_duration(scene, duration), 6)
 
+    def test_audio_sync_takes_priority_over_stagger_in_the_standard_sample(self):
+        spec = json.loads((ROOT / "samples" / "sample-spec.json").read_text())
+        for scene in spec["timeline"]:
+            if scene["type"] == "bullets":
+                self.assertEqual(len(scene["narration_per_bullet"]), len(scene["items"]))
+        self.cache_audio()
+        starts = []
+        _, audio_duration = render.synth_narration(self.scene, self.root, {}, starts)
+        duration = render.scene_duration(self.scene, audio_duration)
+        for stagger in (0, 0.4, 10):
+            scene = {**self.scene, "stagger": stagger}
+            with render.build_bullets(scene, self.theme, bullet_starts=starts, duration=duration).with_duration(duration) as clip:
+                self.assertEqual([bullet.start for bullet in clip.clips[1:]], starts)
+                self.assertEqual(self.visible_bullets(clip.get_frame(0.6))[0], [True, False, False])
+
+    def test_default_custom_and_zero_stagger(self):
+        scene = {"type": "bullets", "items": self.scene["items"], "anim": "none"}
+        for stagger in (None, 0, 0.7):
+            with self.subTest(stagger=stagger):
+                config = scene if stagger is None else {**scene, "stagger": stagger}
+                interval = 0.4 if stagger is None else stagger
+                with render.build_bullets(config, self.theme, duration=4).with_duration(4) as clip:
+                    self.assertEqual([b.start for b in clip.clips[1:]], [i * interval for i in range(3)])
+                    self.assertEqual(self.visible_bullets(clip.get_frame(0.2))[0],
+                                     [True, True, True] if stagger == 0 else [True, False, False])
+        for invalid in (-0.1, float("nan"), float("inf")):
+            with self.assertRaisesRegex(ValueError, "stagger"):
+                render.build_bullets({**scene, "stagger": invalid}, self.theme)
+
+    def test_stagger_preserves_alignment_in_full_width_and_both_spotlight_layouts(self):
+        image = self.root / "panel.png"
+        Image.new("RGB", (640, 360), "orange").save(image)
+        for side in (None, "left", "right"):
+            with self.subTest(side=side):
+                scene = {"type": "bullets", "heading": "Heading", "items": self.scene["items"], "stagger": 0.4}
+                if side:
+                    scene["image"] = {"src": str(image), "placement": side}
+                with patch.object(render, "scene_image_clip", return_value=str(image) if side else None):
+                    clip = render.build_bullets(scene, self.theme, self.root, duration=3).with_duration(3)
+                try:
+                    heading, *bullets = clip.clips[-4:]
+                    self.assertTrue(all(b.pos(0)[0] == heading.pos(0)[0] for b in bullets))
+                    roi = (300, 640) if side == "left" else (0, 330) if side == "right" else (0, 448)
+                    for t, count in ((0.2, 1), (0.6, 2), (1.0, 3), (2.9, 3)):
+                        visible, edges = self.visible_bullets(clip.get_frame(t), roi)
+                        self.assertEqual(visible, [i < count for i in range(3)])
+                        self.assertLessEqual(max(edges) - min(edges), 1)
+                finally:
+                    clip.close()
+
+    def test_encoded_stagger_keeps_existing_scene_duration_rules(self):
+        self.cache_audio()
+        text = self.scene["narration_per_bullet"][0]
+        for narration, explicit, expected in ((None, None, 4.4), (None, 2.5, 2.5),
+                                               (text, None, 1.8), (text, 4.5, 4.5)):
+            with self.subTest(narration=narration, explicit=explicit):
+                scene = {"type": "bullets", "items": self.scene["items"], "stagger": 0.4, "anim": "none"}
+                if narration:
+                    scene["narration"] = narration
+                if explicit:
+                    scene["duration"] = explicit
+                spec = self.root / "stagger.json"
+                spec.write_text(json.dumps({"meta": {"fps": 20}, "theme": self.theme, "timeline": [scene]}))
+                output = self.root / "stagger.mp4"
+                with patch.object(render, "_export_pptx"), contextlib.redirect_stdout(io.StringIO()):
+                    render.render(str(spec), str(output), str(self.root))
+                with VideoFileClip(str(output)) as video:
+                    self.assertAlmostEqual(video.duration, expected, delta=0.06)
+                    self.assertEqual(video.audio is not None, bool(narration))
+                    for t, count in ((0.2, 1), (0.6, 2), (1.0, 3), (expected - 0.1, 3)):
+                        self.assertEqual(self.visible_bullets(video.get_frame(t))[0], [i < count for i in range(3)])
+
+    def test_short_explicit_scene_does_not_extend_or_create_negative_clip_durations(self):
+        scene = {"type": "bullets", "items": self.scene["items"], "duration": 0.3, "stagger": 0.4}
+        duration = render.scene_duration(scene, 0)
+        self.assertEqual(duration, 0.3)
+        with render.build_bullets(scene, self.theme, duration=duration).with_duration(duration) as clip:
+            self.assertEqual(self.visible_bullets(clip.get_frame(0.2))[0], [True, False, False])
+            self.assertTrue(all(b.duration > 0 for b in clip.clips[1:]))
+
     def test_mismatched_entries_fail_before_api_calls(self):
         with self.assertRaisesRegex(ValueError, "one narration entry per bullet"):
             render.synth_narration({**self.scene, "narration_per_bullet": ["Only one"]}, self.root, {})
 
-    def test_missing_key_keeps_the_original_silent_layout(self):
+    def test_missing_key_falls_back_to_stagger(self):
         spec = self.root / "missing.json"
-        spec.write_text(json.dumps({"meta": {"fps": 10}, "theme": self.theme, "timeline": [self.scene]}))
+        scene = {**self.scene, "stagger": 0.4}
+        spec.write_text(json.dumps({"meta": {"fps": 10}, "theme": self.theme, "timeline": [scene]}))
         with patch.object(render.tts, "synth_to_file", side_effect=RuntimeError("MISTRAL_API_KEY not set")), \
                 patch.object(render, "_export_pptx"), contextlib.redirect_stdout(io.StringIO()) as log:
             render.render(str(spec), str(self.root / "silent.mp4"), str(self.root))
         self.assertIn("without narration", log.getvalue())
         with VideoFileClip(str(self.root / "silent.mp4")) as video:
             self.assertIsNone(video.audio)
-            self.assertEqual(self.visible_bullets(video.get_frame(0.8))[0], [True, True, True])
+            self.assertEqual(self.visible_bullets(video.get_frame(0.2))[0], [True, False, False])
+            self.assertEqual(self.visible_bullets(video.get_frame(1.0))[0], [True, True, True])
 
     def test_encoded_frames_audio_and_tail_in_normal_and_streamed_videos(self):
         for count, fmt, lead, trailing in ((2, "wav", 0.2, False), (2, "mp3", 0.2, False),

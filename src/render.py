@@ -10,6 +10,7 @@ import argparse
 from contextlib import ExitStack
 import hashlib
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -277,9 +278,17 @@ def _wrap_to_width(text: str, size: int, font: str, max_w_px: int,
 
 
 def build_bullets(scene, theme, workdir=None, bullet_starts=None, duration=None):
-    """build the existing bullet layout, with optional narration-timed reveals"""
+    """keep the bullet layout and reveal each item at its audio offset or stagger"""
     if bullet_starts is not None and (len(bullet_starts) != len(scene["items"]) or duration is None):
         raise ValueError("Timed bullets need a start time per item and a scene duration")
+    if bullet_starts is None:
+        # decoded narration timings take priority over the fixed interval
+        stagger = scene.get("stagger", 0.4)
+        if not math.isfinite(stagger) or stagger < 0:
+            raise ValueError("Bullet stagger must be a finite, non-negative number")
+        bullet_starts = [i * stagger for i in range(len(scene["items"]))]
+    if duration is None:
+        duration = scene_duration(scene, 0)
     bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
     clips = [bg]
     text_x_frac = 0.5
@@ -306,15 +315,17 @@ def build_bullets(scene, theme, workdir=None, bullet_starts=None, duration=None)
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
     for i, item in enumerate(scene["items"]):
+        start = bullet_starts[i]
+        # keep the requested scene length even when a reveal would fall beyond its end
+        if start >= duration:
+            continue
         bullet = _left_text_clip("• " + item, theme, b_size,
                                  max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
         bullet = bullet.with_position((x, y))
-        if bullet_starts is not None:
-            # reveal at the start of this bullet's speech and keep it visible afterwards
-            start = bullet_starts[i]
-            bullet = bullet.with_duration(duration - start) \
-                .with_effects([vfx.CrossFadeIn(BULLET_FADE_IN)]).with_start(start)
+        # fade the alpha mask so the text stays in place and remains visible until the end
+        bullet = bullet.with_duration(duration - start) \
+            .with_effects([vfx.CrossFadeIn(BULLET_FADE_IN)]).with_start(start)
         clips.append(bullet)
     return CompositeVideoClip(clips, size=(W, H))
 

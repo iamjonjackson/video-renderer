@@ -371,6 +371,38 @@ def apply_anim(clip, anim: str, duration: float):
     return clip
 
 
+def apply_branding(clip, scene, branding, base_dir, dur):
+    """Overlay the optional branding logo on a finished scene clip.
+
+    Added after animations so the logo stays fixed (no fade/zoom). Returns the
+    clip untouched when branding is absent, excluded for this scene type, or the
+    logo is missing (warns, never aborts)."""
+    if not branding or not branding.get("logo"):
+        return clip
+    scenes = branding.get("scenes", "all")
+    if scenes != "all" and scene["type"] not in scenes:
+        return clip
+    logo_path = Path(branding["logo"])
+    if not logo_path.is_absolute():
+        logo_path = Path(base_dir) / logo_path
+    if not logo_path.exists():
+        print(f"[warn] branding logo not found: {logo_path} — skipping")
+        return clip
+    margin = int(branding.get("margin", 40))
+    max_h = H * float(branding.get("max_height", 0.1))
+    logo = ImageClip(str(logo_path))  # RGBA PNG: alpha becomes the clip mask
+    logo = logo.resized(min(max_h / logo.h, (W - 2 * margin) / logo.w))
+    pos = branding.get("position", "bottom-right")
+    v, h = pos.split("-")
+    x = margin if h == "left" else W - margin - logo.w
+    y = margin if v == "top" else H - margin - logo.h
+    logo = logo.with_position((int(x), int(y))).with_duration(dur)
+    opacity = float(branding.get("opacity", 1.0))
+    if opacity < 1.0:
+        logo = logo.with_opacity(opacity)
+    return CompositeVideoClip([clip, logo], size=(W, H)).with_duration(dur)
+
+
 def _ffmpeg_exe() -> str:
     from shutil import which
     p = which("ffmpeg")
@@ -392,6 +424,10 @@ def _export_pptx(spec, scene_artifacts, output):
 
 def render(spec_path: str, output: str, workdir: str | None = None):
     spec = load_spec(spec_path)
+    # Resolve the logo path once so the video overlay and PPTX export agree.
+    branding = spec.get("branding")
+    if branding and branding.get("logo") and not Path(branding["logo"]).is_absolute():
+        branding["logo"] = str(Path(spec_path).parent / branding["logo"])
     theme = spec["theme"]
     voice_cfg = spec.get("voice", {})
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
@@ -433,6 +469,9 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         if scene.get("anim") in ("zoom-in", "kenburns"):
             clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
                 .with_duration(dur)
+
+        clip = apply_branding(clip, scene, spec.get("branding"),
+                              Path(spec_path).parent, dur)
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))

@@ -21,6 +21,49 @@ def _rgb(hex_color: str) -> RGBColor:
     return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
+FRAME_W, FRAME_H = 1920, 1080  # video frame the branding spec is expressed in
+
+
+def _branding_applies(branding, scene) -> bool:
+    if not branding or not branding.get("logo"):
+        return False
+    scenes = branding.get("scenes", "all")
+    return scenes == "all" or scene["type"] in scenes
+
+
+def _add_logo(slide, branding):
+    """Place the branding logo using the same rules as the video overlay:
+    corner + margin + max_height (fractions/pixels of the 1920x1080 frame),
+    PNG alpha kept, opacity applied as picture transparency."""
+    from PIL import Image
+    from pptx.oxml.ns import qn
+    from lxml import etree
+
+    logo_path = Path(branding["logo"])
+    if not logo_path.exists():
+        print(f"[warn] branding logo not found: {logo_path} — skipping on slides")
+        return
+    with Image.open(logo_path) as im:
+        lw, lh = im.size
+    margin = int(branding.get("margin", 40))
+    max_h = FRAME_H * float(branding.get("max_height", 0.1))
+    scale = min(max_h / lh, (FRAME_W - 2 * margin) / lw)
+    w_px, h_px = lw * scale, lh * scale
+    v, h = branding.get("position", "bottom-right").split("-")
+    x_px = margin if h == "left" else FRAME_W - margin - w_px
+    y_px = margin if v == "top" else FRAME_H - margin - h_px
+    emu = SLIDE_W / FRAME_W  # EMU per frame pixel
+    pic = slide.shapes.add_picture(str(logo_path), Emu(int(x_px * emu)),
+                                   Emu(int(y_px * emu)),
+                                   width=Emu(int(w_px * emu)),
+                                   height=Emu(int(h_px * emu)))
+    opacity = float(branding.get("opacity", 1.0))
+    if opacity < 1.0:
+        blip = pic._element.find(".//" + qn("a:blip"))
+        mod = etree.SubElement(blip, qn("a:alphaModFix"))
+        mod.set("amt", str(int(opacity * 100000)))
+
+
 def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
     """scene_artifacts: per-scene dicts with optional keys
     narration_path, chart_png, image_png, bg_image_png, scrim (0-1)."""
@@ -122,11 +165,19 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 cr.font.size = Pt(16)
                 cr.font.color.rgb = fg
 
-        # embed narration audio on the slide
+        branded = _branding_applies(spec.get("branding"), scene)
+        if branded:
+            _add_logo(slide, spec["branding"])
+
+        # embed narration audio on the slide; keep its icon clear of a
+        # bottom-right logo by moving it to the bottom-left corner
         if art.get("narration_path"):
+            icon_left = SLIDE_W - Inches(1.05)
+            if branded and spec["branding"].get("position", "bottom-right") == "bottom-right":
+                icon_left = Inches(0.25)
             slide.shapes.add_movie(
                 art["narration_path"],
-                left=SLIDE_W - Inches(1.05), top=SLIDE_H - Inches(1.05),
+                left=icon_left, top=SLIDE_H - Inches(1.05),
                 width=Inches(0.8), height=Inches(0.8),
                 poster_frame_image=None, mime_type="audio/wav"
             )

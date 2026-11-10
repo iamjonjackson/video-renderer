@@ -1,0 +1,25 @@
+{
+  "meta": {"title": "Editable chart examples", "fps": 10},
+  "theme": {"preset": "dark", "accent": "#58a6ff"},
+  "timeline": [
+    {
+      "type": "chart", "chart_type": "bar", "heading": "Monthly recurring revenue",
+      "labels": ["Jul", "Aug", "Sep"], "values": [410, 455, 512],
+      "y_label": "Revenue ($k)", "duration": 2
+    },
+    {
+      "type": "chart", "chart_type": "line", "heading": "Monthly recurring revenue",
+      "labels": ["Jul", "Aug", "Sep"], "values": [410, 455, 512],
+      "y_label": "Revenue ($k)", "duration": 2
+    },
+    {
+      "type": "chart", "chart_type": "pie", "heading": "Revenue by product",
+      "labels": ["Core", "Teams", "Enterprise"], "values": [47, 33, 20], "duration": 2
+    },
+    {
+      "type": "chart", "chart_type": "bar", "pptx_chart": "png", "heading": "PNG export example",
+      "labels": ["Jul", "Aug", "Sep"], "values": [410, 455, 512],
+      "y_label": "Revenue ($k)", "duration": 2
+    }
+  ]
+}

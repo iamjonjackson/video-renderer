@@ -7,6 +7,7 @@ Scene durations are audio-driven when `narration` is present (duration = audio
 length + padding), unless an explicit `duration` overrides them.
 """
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import subprocess
@@ -27,6 +28,7 @@ import tts
 import presets
 
 ANIM_IN = 0.6
+BULLET_FADE_IN = 0.15
 SLIDE_DIST = 120
 W, H = 1920, 1080
 
@@ -64,11 +66,18 @@ def load_spec(path: str) -> dict:
     return spec
 
 
-def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
-    """Synthesize narration if present; return (audio_path, duration)."""
+def synth_narration(scene: dict, workdir: Path, voice_cfg: dict,
+                    bullet_starts: list[float] | None = None) -> tuple[str | None, float]:
+    """return the audio path and duration, optionally collecting bullet start times
+
+    bullet_starts is filled only after the full narration is ready so a failed
+    request cannot leave part of the scene using incomplete timings
+    """
     texts = []
     per_bullet = scene.get("narration_per_bullet")
     if per_bullet:
+        if scene.get("type") == "bullets" and len(per_bullet) != len(scene["items"]):
+            raise ValueError("narration_per_bullet needs one narration entry per bullet")
         texts = per_bullet
     elif scene.get("narration"):
         texts = [scene["narration"]]
@@ -86,13 +95,29 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
                 fmt=voice_cfg.get("format", "wav"),
             )
         paths.append(str(out))
+    starts, total = [], 0.0
+    if per_bullet and bullet_starts is not None:
+        # use the same decoded durations as playback, not container estimates
+        for path in paths:
+            starts.append(total)
+            total += tts.audio_duration(path)
     if len(paths) == 1:
-        return paths[0], tts.audio_duration(paths[0])
-    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
-    if not combined.exists():
-        merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
-        merged.write_audiofile(str(combined), logger=None)
-    return str(combined), tts.audio_duration(str(combined))
+        audio_path = paths[0]
+        audio_dur = total if starts else tts.audio_duration(audio_path)
+    else:
+        combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
+        if not combined.exists():
+            # release the individual audio readers once the joined track is saved
+            with ExitStack() as stack:
+                clips = [stack.enter_context(AudioFileClip(p)) for p in paths]
+                with concatenate_audioclips(clips) as merged:
+                    merged.write_audiofile(str(combined), logger=None)
+        audio_path = str(combined)
+        # allow for any extra samples added while encoding the combined track
+        audio_dur = max(tts.audio_duration(audio_path), total)
+    if bullet_starts is not None:
+        bullet_starts.extend(starts)
+    return audio_path, audio_dur
 
 
 def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float:
@@ -251,7 +276,10 @@ def _wrap_to_width(text: str, size: int, font: str, max_w_px: int,
     return "\n".join(lines[:max_lines])
 
 
-def build_bullets(scene, theme, workdir=None):
+def build_bullets(scene, theme, workdir=None, bullet_starts=None, duration=None):
+    """build the existing bullet layout, with optional narration-timed reveals"""
+    if bullet_starts is not None and (len(bullet_starts) != len(scene["items"]) or duration is None):
+        raise ValueError("Timed bullets need a start time per item and a scene duration")
     bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
     clips = [bg]
     text_x_frac = 0.5
@@ -281,7 +309,13 @@ def build_bullets(scene, theme, workdir=None):
         bullet = _left_text_clip("• " + item, theme, b_size,
                                  max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
-        clips.append(bullet.with_position((x, y)))
+        bullet = bullet.with_position((x, y))
+        if bullet_starts is not None:
+            # reveal at the start of this bullet's speech and keep it visible afterwards
+            start = bullet_starts[i]
+            bullet = bullet.with_duration(duration - start) \
+                .with_effects([vfx.CrossFadeIn(BULLET_FADE_IN)]).with_start(start)
+        clips.append(bullet)
     return CompositeVideoClip(clips, size=(W, H))
 
 
@@ -391,6 +425,7 @@ def _export_pptx(spec, scene_artifacts, output):
 
 
 def render(spec_path: str, output: str, workdir: str | None = None):
+    """prepare narration timings before building scenes, then export the video and slides"""
     spec = load_spec(spec_path)
     theme = spec["theme"]
     voice_cfg = spec.get("voice", {})
@@ -400,6 +435,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     video_clips, audios = [], []
     scene_artifacts = []
     t_cursor = 0.0
+    encoded_time = 0.0
+    timed_bullets_present = False
     fps = spec["meta"]["fps"]
     stream = len(spec["timeline"]) > 12
     seg_dir = workdir / "segments"
@@ -409,13 +446,11 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     for i, scene in enumerate(spec["timeline"]):
         stype = scene["type"]
         builder = BUILDERS[stype]
-        if stype in ("image", "chart", "title", "bullets"):
-            clip = builder(scene, theme, workdir)
-        else:
-            clip = builder(scene, theme)
-
+        bullet_starts = []
         try:
-            audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
+            # narration must be ready before the bullet clips can receive their timings
+            audio_path, audio_dur = synth_narration(
+                scene, workdir, voice_cfg, bullet_starts=bullet_starts if stype == "bullets" else None)
         except RuntimeError as e:
             if "MISTRAL_API_KEY" in str(e):
                 print(f"[warn] {e} — rendering scene {i} without narration")
@@ -424,15 +459,27 @@ def render(spec_path: str, output: str, workdir: str | None = None):
                 raise
 
         dur = scene_duration(scene, audio_dur)
-        clip = clip.with_duration(dur)
-        clip = apply_anim(clip, scene.get("anim", "fade"), dur)
+        # encoded segments round down to whole frames, which can add up before this scene
+        # delay only the timed bullets and extend their scene to keep speech and padding intact
+        visual_delay = max(0.0, t_cursor - encoded_time) if stream and bullet_starts else 0.0
+        video_dur = dur + visual_delay
+        if stype == "bullets":
+            clip = builder(scene, theme, workdir,
+                           bullet_starts=[start + visual_delay for start in bullet_starts] or None,
+                           duration=video_dur)
+        elif stype in ("image", "chart", "title"):
+            clip = builder(scene, theme, workdir)
+        else:
+            clip = builder(scene, theme)
+        clip = clip.with_duration(video_dur)
+        clip = apply_anim(clip, scene.get("anim", "fade"), video_dur)
         # Animations like zoom-in resize frames over time even though the
         # clip's nominal size stays 1920x1080; composite onto the fixed canvas
         # so encoding always sees constant frame dimensions (variable-size
         # streams decode as garbage/static in players).
         if scene.get("anim") in ("zoom-in", "kenburns"):
             clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
-                .with_duration(dur)
+                .with_duration(video_dur)
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))
@@ -442,6 +489,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         if stream:
             seg = seg_dir / f"seg_{i:03d}.mp4"
             clip.write_videofile(str(seg), fps, codec="libx264", logger=None)
+            encoded_time += int(video_dur * fps) / fps
             clip.close()
             del clip
         else:
@@ -465,6 +513,10 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
         print(f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
               + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
+        if bullet_starts:
+            timed_bullets_present = True
+            print(f"[scene {i}] bullet narration starts: "
+                  + ", ".join(f"{t_cursor + start:.3f}s" for start in bullet_starts))
         t_cursor += dur
 
     if stream:
@@ -481,7 +533,11 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         # Mux narration: one pass with all audio offsets as inputs
         if audios:
             mixed = workdir / "narration_all.wav"
-            CompositeAudioClip(audios).write_audiofile(str(mixed), logger=None)
+            narration = CompositeAudioClip(audios)
+            if timed_bullets_present:
+                # keep scene tails and any silent outro when ffmpeg uses the shortest stream
+                narration = narration.with_duration(t_cursor)
+            narration.write_audiofile(str(mixed), logger=None)
             tmp = str(Path(output).with_suffix(".mux.mp4"))
             subprocess.run([ffmpeg, "-y", "-loglevel", "error",
                            "-i", output, "-i", str(mixed),

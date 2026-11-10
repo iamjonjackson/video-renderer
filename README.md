@@ -86,6 +86,68 @@ the render continues with a warning (best-effort) — it never aborts.
 by construction) with the image in a bordered panel.
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
   `padding` (default 1.0s) adds a guaranteed tail buffer after narration.
+- **Narration-timed bullets**: use `narration_per_bullet` with one entry for
+  each item. Each bullet starts a short 0.15s fade when its own narration
+  clip starts, then stays visible. Offsets use cumulative decoded audio
+  durations, including when WAV or MP3 files come from the cache. `stagger`
+  does not control these reveals. Left alignment and the default 1.0s tail
+  padding are retained; an explicit `duration` can extend the scene.
+
+  ```json
+  {
+    "type": "bullets",
+    "heading": "Key wins",
+    "items": ["Revenue increased", "Churn decreased", "New clients joined"],
+    "narration_per_bullet": [
+      "Revenue increased this quarter.",
+      "Churn decreased compared with the previous quarter.",
+      "Two new clients joined the platform."
+    ]
+  }
+  ```
+
+  If the audio clips last 2, 3, and 4 seconds, the bullets appear at scene
+  offsets 0, 2, and 5 seconds, and the scene lasts at least 10 seconds with
+  default padding. The render log prints the absolute bullet start times
+  in the final video. `narration_per_bullet` takes precedence over plain
+  `narration`, as before. A mismatched number of entries reports an error
+  before TTS requests are made.
+
+  Single-`narration` and silent scenes keep their existing appearance, with
+  all bullets shown together. If the API key is missing, the existing
+  warning and silent rendering behaviour still apply. The timed reveals
+  are a video feature; PPTX slides still contain the complete bullet list
+  with the combined narration track.
+
+  Render the full five-slide quarterly review using a configured TTS key or
+  cache. Both **Key Wins** and **Looking Ahead** use three timed bullets;
+  the title, chart, image panel and outro are included too:
+
+  ```bash
+  python3 src/render.py samples/bullet-sync-spec.json -o output/full-bullet-sync-demo.mp4
+  ```
+
+  The existing renderer writes both `output/full-bullet-sync-demo.mp4` and
+  `output/full-bullet-sync-demo.pptx`; no separate export script is needed.
+  The MP4 contains the timed reveals. The PPTX contains all five slides,
+  with the complete bullet lists and their combined narration embedded.
+  Editing either file does not update the JSON spec or the other output.
+
+  Play the MP4 and compare each reveal with the narration and logged start
+  times. Pause just before and after a start time for screenshot evidence.
+  An empty cache needs eight TTS requests and optional image generation;
+  unchanged cached assets are reused on later runs.
+
+  Run the automated checks without API calls:
+
+  ```bash
+  python3 -m unittest discover -s tests -p 'test_bullet_sync.py' -v
+  ```
+
+  Tests use unequal WAV/MP3 clip lengths, check visible bullet rows at
+  offsets ±0.2s, compare the last audible sample with the video end, and
+  cover normal/long-video rendering, caching, missing keys, alignment,
+  single bullets, explicit durations, and unchanged untimed scenes.
 - **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a
   cloned `voice_id` from a 2–3s audio sample.
 - Full contract: `src/schema.json` (JSON Schema).

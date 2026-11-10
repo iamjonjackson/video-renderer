@@ -18,7 +18,11 @@ jobs:
 
       - name: Install Python deps
         run: |
-          pip install moviepy matplotlib imageio-ffmpeg pillow python-pptx
+          pip install -r requirements.txt
+
+      - name: Validate sample specs
+        run: |
+          for spec in samples/*.json; do python3 src/render.py "$spec" --validate || exit 1; done
 
       - name: Render ${{ matrix.spec }}
         env:

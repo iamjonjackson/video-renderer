@@ -1,0 +1,6 @@
+{
+  "timeline": [
+    { "type": "title", "text": "My first video" },
+    { "type": "bullet", "items": ["One", "Two"] }
+  ]
+}

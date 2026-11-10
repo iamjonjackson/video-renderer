@@ -1,0 +1,6 @@
+{
+  "meta": { "fps": "30" },
+  "timeline": [
+    { "type": "bullets", "items": "Just one string", "duration": "5" }
+  ]
+}

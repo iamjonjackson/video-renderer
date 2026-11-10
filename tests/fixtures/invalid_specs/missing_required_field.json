@@ -1,0 +1,6 @@
+{
+  "timeline": [
+    { "type": "title", "subtitle": "No main text here" },
+    { "type": "chart", "labels": ["Jul", "Aug"] }
+  ]
+}

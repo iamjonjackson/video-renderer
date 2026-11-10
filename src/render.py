@@ -1,11 +1,19 @@
 """Declarative video spec renderer.
 
 Usage:
-    python3 render.py spec.json [-o output.mp4] [--workdir /tmp/renders]
+    python3 render.py spec.json [-o output.mp4] [--workdir /tmp/renders] [--pptx-only]
+    python3 render.py spec.json --validate   # check only; exit 0 valid, 1 invalid
+
+Specs are validated against schema.json before any rendering starts; every
+problem is reported at once, numbered by scene from 1.
 
 Scene durations are audio-driven when `narration` is present (duration = audio
 length + padding), unless an explicit `duration` overrides them.
+
+--pptx-only skips the video path and writes just the .pptx (narration,
+AI images and charts still generated, or reused from the workdir cache).
 """
+
 import argparse
 import hashlib
 import json
@@ -14,38 +22,61 @@ import sys
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from moviepy import (ColorClip, CompositeVideoClip, ImageClip, TextClip,
-                     VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_videoclips,
-                     concatenate_audioclips, vfx)
+from moviepy import (
+    AudioFileClip,
+    ColorClip,
+    CompositeAudioClip,
+    CompositeVideoClip,
+    ImageClip,
+    TextClip,
+    concatenate_audioclips,
+    concatenate_videoclips,
+    vfx,
+)
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "themes"))
-import images as imggen
-import tts
 import presets
+
+import composition
+import images as imggen
+import spec_validation
+import tts
 
 ANIM_IN = 0.6
 SLIDE_DIST = 120
+BULLET_FADE = 0.3  # seconds each bullet takes to fade in (issue #5)
 W, H = 1920, 1080
 
 
 def rgb(hex_color: str) -> tuple:
     h = hex_color.lstrip("#")
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
 
 
 def _resolve_font(bold: bool = False) -> str:
     """Return a TTF path with wide glyph coverage (incl. U+2022 bullet)."""
     import os
+
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans%s.ttf" % ("-Bold" if bold else ""),
-        os.path.join(os.path.dirname(matplotlib.__file__),
-                     "mpl-data", "fonts", "ttf",
-                     "DejaVuSans%s.ttf" % ("-Bold" if bold else "")),
-        os.path.join(os.path.dirname(matplotlib.__file__),
-                     "mpl-data", "fonts", "ttf", "DejaVuSans.ttf"),
+        os.path.join(
+            os.path.dirname(matplotlib.__file__),
+            "mpl-data",
+            "fonts",
+            "ttf",
+            "DejaVuSans%s.ttf" % ("-Bold" if bold else ""),
+        ),
+        os.path.join(
+            os.path.dirname(matplotlib.__file__),
+            "mpl-data",
+            "fonts",
+            "ttf",
+            "DejaVuSans.ttf",
+        ),
     ]
     for c in candidates:
         if os.path.exists(c):
@@ -54,7 +85,13 @@ def _resolve_font(bold: bool = False) -> str:
 
 
 def load_spec(path: str) -> dict:
-    spec = json.loads(Path(path).read_text())
+    """Read, validate and theme-merge a spec.
+
+    Raises SpecValidationError listing every problem before any rendering
+    work starts; validation runs on the raw JSON, ahead of preset lookup.
+    """
+    spec = spec_validation.read_spec(path)
+    spec_validation.validate_spec(spec, path)
     theme = dict(presets.__dict__[spec.get("theme", {}).get("preset", "dark")])
     theme.update({k: v for k, v in spec.get("theme", {}).items() if k != "preset"})
     spec["theme"] = theme
@@ -64,7 +101,9 @@ def load_spec(path: str) -> dict:
     return spec
 
 
-def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
+def synth_narration(
+    scene: dict, workdir: Path, voice_cfg: dict
+) -> tuple[str | None, float]:
     """Synthesize narration if present; return (audio_path, duration)."""
     texts = []
     per_bullet = scene.get("narration_per_bullet")
@@ -75,20 +114,38 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
     if not texts:
         return None, 0.0
     paths = []
+    provider = voice_cfg.get("provider", tts.DEFAULT_PROVIDER)
+    fmt = voice_cfg.get("format", "wav")
     for i, text in enumerate(texts):
-        h = hashlib.sha1(text.encode()).hexdigest()[:10]
-        out = workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'wav')}"
+        # Key covers provider + voice + model, so switching providers (or
+        # voices) regenerates instead of replaying another provider's audio.
+        out = workdir / f"narr_{provider}_{tts.cache_key(text, voice_cfg)}_{i}.{fmt}"
         if not out.exists():
+            tmp = out.with_name(out.stem + ".part" + out.suffix)
             tts.synth_to_file(
-                text, str(out),
-                voice_slug=voice_cfg.get("slug"), voice_id=voice_cfg.get("voice_id"),
-                model=voice_cfg.get("model", "voxtral-mini-tts-2603"),
-                fmt=voice_cfg.get("format", "wav"),
+                text,
+                str(tmp),
+                voice_slug=voice_cfg.get("slug"),
+                voice_id=voice_cfg.get("voice_id"),
+                model=voice_cfg.get("model"),
+                fmt=fmt,
+                provider=provider,
+                style=voice_cfg.get("style"),
             )
+            tmp.replace(out)  # never leave a half-written clip in the cache
         paths.append(str(out))
+    if per_bullet:
+        # #6: when each bullet's clip starts in the joined track, from the
+        # decoded durations (same measure as the timeline), as a running sum.
+        durs = [tts.audio_duration(p) for p in paths]
+        scene["_bullet_starts"] = [sum(durs[:i]) for i in range(len(durs))]
+        print("[bullets] reveal at " + ", ".join(f"{t:.2f}s" for t in scene["_bullet_starts"]))
     if len(paths) == 1:
         return paths[0], tts.audio_duration(paths[0])
-    combined = workdir / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{voice_cfg.get('format', 'wav')}"
+    combined = (
+        workdir
+        / f"narr_combined_{hashlib.sha1(json.dumps(paths).encode()).hexdigest()[:10]}.{fmt}"
+    )
     if not combined.exists():
         merged = concatenate_audioclips([AudioFileClip(p) for p in paths])
         merged.write_audiofile(str(combined), logger=None)
@@ -110,17 +167,24 @@ def scene_duration(scene: dict, audio_dur: float, default: float = 4.0) -> float
     return default
 
 
-
-def centered_text_clip(text: str, theme: dict, size: int, color: str | None = None,
-                       x_frac: float = 0.5, y_frac: float = 0.5,
-                       max_w_frac: float = 0.85, bold: bool = False) -> TextClip:
+def centered_text_clip(
+    text: str,
+    theme: dict,
+    size: int,
+    color: str | None = None,
+    x_frac: float = 0.5,
+    y_frac: float = 0.5,
+    max_w_frac: float = 0.85,
+    bold: bool = False,
+) -> TextClip:
     """Text centered at (x_frac, y_frac) of the frame.
 
     Auto height with a generous bottom margin: the box is always taller
     than the text, so descenders never clip.
     """
     clip = TextClip(
-        text=text, font_size=size,
+        text=text,
+        font_size=size,
         color=color or theme["fg"],
         font=_resolve_font(bold),
         method="caption",
@@ -142,11 +206,15 @@ def scene_image_clip(scene: dict, theme: dict, workdir: Path):
     if not img_cfg.get("prompt"):
         print("[warn] scene 'image' block missing 'prompt'; skipping")
         return None
-    out = workdir / f"sceneimg_{hashlib.sha1(json.dumps(img_cfg, sort_keys=True).encode()).hexdigest()[:12]}.png"
+    out = (
+        workdir
+        / f"sceneimg_{hashlib.sha1(json.dumps(img_cfg, sort_keys=True).encode()).hexdigest()[:12]}.png"
+    )
     if not out.exists():
         try:
-            imggen.generate_image(img_cfg["prompt"], str(out),
-                                   model=img_cfg.get("model"), workdir=workdir)
+            imggen.generate_image(
+                img_cfg["prompt"], str(out), model=img_cfg.get("model"), workdir=workdir
+            )
         except RuntimeError as e:
             print(f"[warn] image generation failed ({e}); rendering without image")
             return None
@@ -159,13 +227,18 @@ def build_title(scene, theme, workdir=None):
     img_path = scene_image_clip(scene, theme, workdir) if workdir else None
     if img_path:
         clips = composite_bg_image(clips, scene, theme, img_path)
-    title = centered_text_clip(scene["text"], theme, theme["title_font_size"],
-                               bold=True, y_frac=0.42)
+    title = centered_text_clip(
+        scene["text"], theme, theme["title_font_size"], bold=True, y_frac=0.42
+    )
     clips.append(title)
     if scene.get("subtitle"):
-        sub = centered_text_clip(scene["subtitle"], theme,
-                                 int(theme["font_size"] * 0.55),
-                                 color=theme["accent"], y_frac=0.58)
+        sub = centered_text_clip(
+            scene["subtitle"],
+            theme,
+            int(theme["font_size"] * 0.55),
+            color=theme["accent"],
+            y_frac=0.58,
+        )
         clips.append(sub)
     return CompositeVideoClip(clips, size=(W, H))
 
@@ -178,19 +251,27 @@ def composite_bg_image(clips, scene, theme, img_path):
     scale = max(W / bg_img.w, H / bg_img.h)
     bg_img = bg_img.resized(scale)
     if bg_img.w > W or bg_img.h > H:
-        bg_img = bg_img.cropped(x_center=bg_img.w / 2, y_center=bg_img.h / 2,
-                                width=W, height=H)
+        bg_img = bg_img.cropped(
+            x_center=bg_img.w / 2, y_center=bg_img.h / 2, width=W, height=H
+        )
     bg_img = bg_img.with_opacity(opacity).with_position((0, 0))
     scrim, passes = imggen.scrim_for_contrast(
-        img_path, theme["fg"], theme["bg"],
+        img_path,
+        theme["fg"],
+        theme["bg"],
         text_area=(0.5, 0.5, 0.7, 0.4),
         img_opacity=opacity,
     )
     if not passes:
-        print(f"[warn] scene background image cannot reach 4.5:1 contrast "
-              f"even at scrim {scrim:.2f}; text may be hard to read")
-    scrim_clip = ColorClip(size=(W, H), color=rgb(theme["bg"])) \
-        .with_opacity(scrim).with_position((0, 0))
+        print(
+            f"[warn] scene background image cannot reach 4.5:1 contrast "
+            f"even at scrim {scrim:.2f}; text may be hard to read"
+        )
+    scrim_clip = (
+        ColorClip(size=(W, H), color=rgb(theme["bg"]))
+        .with_opacity(scrim)
+        .with_position((0, 0))
+    )
     return [clips[0], bg_img, scrim_clip] + clips[1:]
 
 
@@ -207,35 +288,48 @@ def build_spotlight_panel(scene, theme, img_path):
     scale = max(panel_w / img.w, panel_h / img.h)
     img = img.resized(scale)
     if img.w > panel_w or img.h > panel_h:
-        img = img.cropped(x_center=img.w / 2, y_center=img.h / 2,
-                          width=panel_w, height=panel_h)
+        img = img.cropped(
+            x_center=img.w / 2, y_center=img.h / 2, width=panel_w, height=panel_h
+        )
     img = img.with_position((x, y))
-    border = ColorClip(size=(panel_w + 8, panel_h + 8),
-                       color=rgb(theme["accent"])).with_position((x - 4, y - 4))
+    border = ColorClip(
+        size=(panel_w + 8, panel_h + 8), color=rgb(theme["accent"])
+    ).with_position((x - 4, y - 4))
     text_x = 0.28 if side == "right" else 0.72
     return [border, img], text_x
 
 
-def _left_text_clip(text: str, theme: dict, size: int, color: str | None = None,
-                    bold: bool = False, max_w_px: int | None = None) -> TextClip:
+def _left_text_clip(
+    text: str,
+    theme: dict,
+    size: int,
+    color: str | None = None,
+    bold: bool = False,
+    max_w_px: int | None = None,
+) -> TextClip:
     """Left-aligned text via auto-sized label clips: true edge alignment,
     with margin keeping the box taller than the text (no descender clipping)."""
     font = _resolve_font(bold)
     if max_w_px:
         text = _wrap_to_width(text, size, font, max_w_px)
     return TextClip(
-        text=text, font_size=size,
+        text=text,
+        font_size=size,
         color=color or theme["fg"],
-        font=font, method="label", text_align="left",
+        font=font,
+        method="label",
+        text_align="left",
         vertical_align="center",
         margin=(0, 2, 0, int(size * 0.45)),
     )
 
 
-def _wrap_to_width(text: str, size: int, font: str, max_w_px: int,
-                   max_lines: int = 3) -> str:
+def _wrap_to_width(
+    text: str, size: int, font: str, max_w_px: int, max_lines: int = 3
+) -> str:
     """Word-wrap so each line renders narrower than max_w_px."""
     from PIL import ImageFont
+
     f = ImageFont.truetype(font, size)
     words = text.split()
     lines, cur = [], ""
@@ -269,19 +363,34 @@ def build_bullets(scene, theme, workdir=None):
     x = int(W * (text_x_frac - max_w / 2))
     if scene.get("heading"):
         h_size = int(theme["font_size"] * 0.8)
-        heading = _left_text_clip(scene["heading"], theme, h_size,
-                                  color=theme["accent"], bold=True,
-                                  max_w_px=int(W * max_w))
+        heading = _left_text_clip(
+            scene["heading"],
+            theme,
+            h_size,
+            color=theme["accent"],
+            bold=True,
+            max_w_px=int(W * max_w),
+        )
         clips.append(heading.with_position((x, int(H * 0.16))))
     n = len(scene["items"])
     b_size = int(theme["font_size"] * 0.55)
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
+    stagger = scene.get("stagger", 0.4)
+    starts = scene.get("_bullet_starts")  # narration_per_bullet clip starts (#6)
+    if not starts or len(starts) != n:
+        starts = None
     for i, item in enumerate(scene["items"]):
-        bullet = _left_text_clip("• " + item, theme, b_size,
-                                 max_w_px=int(W * max_w))
+        bullet = _left_text_clip("• " + item, theme, b_size, max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
-        clips.append(bullet.with_position((x, y)))
+        bullet = bullet.with_position((x, y))
+        if starts or stagger > 0:
+            if bullet.mask is None:
+                bullet = bullet.with_mask()
+            bullet = bullet.with_mask(bullet.mask.with_effects([vfx.FadeIn(BULLET_FADE)]))
+            bullet = bullet.with_start(starts[i] if starts else i * stagger)
+        clips.append(bullet)
+
     return CompositeVideoClip(clips, size=(W, H))
 
 
@@ -291,21 +400,31 @@ def build_image(scene, theme, workdir):
     scale = max(W / img_clip.w, H / img_clip.h)
     img_clip = img_clip.resized(scale)
     if img_clip.w > W or img_clip.h > H:
-        img_clip = img_clip.cropped(x_center=img_clip.w / 2, y_center=img_clip.h / 2,
-                                     width=W, height=H)
+        img_clip = img_clip.cropped(
+            x_center=img_clip.w / 2, y_center=img_clip.h / 2, width=W, height=H
+        )
     img_clip = img_clip.with_position("center")
     clips = [img_clip]
     if scene.get("caption"):
         cap_h = int(H * 0.12)
-        cap = centered_text_clip(scene["caption"], theme,
-                                 int(theme["font_size"] * 0.5), y_frac=0.92)
+        cap = centered_text_clip(
+            scene["caption"], theme, int(theme["font_size"] * 0.5), y_frac=0.92
+        )
         cap_bg = ColorClip(size=(W, cap_h), color=(0, 0, 0)).with_opacity(0.6)
         cap_bg = cap_bg.with_position((0, H - cap_h))
         clips.extend([cap_bg, cap])
     return CompositeVideoClip(clips, size=(W, H))
 
 
-def build_chart(scene, theme, workdir):
+def chart_png_path(scene, workdir) -> Path:
+    return (
+        workdir
+        / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
+    )
+
+
+def render_chart_png(scene, theme, workdir) -> str:
+    """Draw the scene's chart with Matplotlib and save it into the workdir."""
     fig, ax = plt.subplots(figsize=(19.2, 10.8), dpi=100)
     fig.patch.set_facecolor(theme["bg"])
     ax.set_facecolor(theme["bg"])
@@ -313,27 +432,41 @@ def build_chart(scene, theme, workdir):
     for spine in ax.spines.values():
         spine.set_color(theme["fg"])
     if scene.get("chart_type", "bar") == "bar":
-        bars = ax.bar(scene["labels"], scene["values"],
-                      color=theme["accent"], width=0.55)
+        ax.bar(scene["labels"], scene["values"], color=theme["accent"], width=0.55)
     elif scene["chart_type"] == "line":
-        ax.plot(scene["labels"], scene["values"], color=theme["accent"],
-                linewidth=4, marker="o", markersize=10)
+        ax.plot(
+            scene["labels"],
+            scene["values"],
+            color=theme["accent"],
+            linewidth=4,
+            marker="o",
+            markersize=10,
+        )
     else:
-        ax.pie(scene["values"], labels=scene["labels"], colors=[theme["accent"], theme["fg"], "#888"],
-               textprops={"color": theme["fg"], "fontsize": 18}, autopct="%1.0f%%")
+        ax.pie(
+            scene["values"],
+            labels=scene["labels"],
+            colors=[theme["accent"], theme["fg"], "#888"],
+            textprops={"color": theme["fg"], "fontsize": 18},
+            autopct="%1.0f%%",
+        )
     if scene["chart_type"] != "pie":
         if scene.get("y_label"):
             ax.set_ylabel(scene["y_label"], color=theme["fg"], fontsize=20)
-        ax.set_title(scene.get("heading", ""), color=theme["fg"],
-                     fontsize=28, pad=20)
+        ax.set_title(scene.get("heading", ""), color=theme["fg"], fontsize=28, pad=20)
         ax.grid(axis="y", alpha=0.25, color=theme["fg"])
     fig.tight_layout(pad=3.5)
-    out = workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png"
+    out = chart_png_path(scene, workdir)
     fig.savefig(out, facecolor=theme["bg"])
     plt.close(fig)
+    return str(out)
+
+
+def build_chart(scene, theme, workdir):
+    out = render_chart_png(scene, theme, workdir)
     # Fit inside the frame with a 6% margin on all sides
     margin = 0.06
-    img = ImageClip(str(out))
+    img = ImageClip(out)
     scale = min(W * (1 - 2 * margin) / img.w, H * (1 - 2 * margin) / img.h)
     img = img.resized(scale)
     x = (W - img.w) // 2
@@ -344,8 +477,9 @@ def build_chart(scene, theme, workdir):
 
 def build_outro(scene, theme):
     bg = ColorClip(size=(W, H), color=rgb(theme["bg"]))
-    txt = centered_text_clip(scene["text"], theme, theme["title_font_size"],
-                             color=theme["accent"], bold=True)
+    txt = centered_text_clip(
+        scene["text"], theme, theme["title_font_size"], color=theme["accent"], bold=True
+    )
     return CompositeVideoClip([bg, txt], size=(W, H))
 
 
@@ -362,40 +496,209 @@ def apply_anim(clip, anim: str, duration: float):
     if anim in ("fade", "kenburns"):
         return clip.with_effects([vfx.FadeIn(ANIM_IN), vfx.FadeOut(ANIM_IN)])
     if anim == "slide-up":
+
         def pos(t):
             return ("center", H / 2 + min(t / ANIM_IN, 1) * SLIDE_DIST)
+
         return clip.with_position(pos).with_effects([vfx.FadeIn(ANIM_IN)])
     if anim == "zoom-in":
-        return clip.resized(lambda t: 1.0 + min(t / (duration * 0.8), 1) * 0.05) \
-                   .with_effects([vfx.FadeIn(ANIM_IN)])
+        return clip.resized(
+            lambda t: 1.0 + min(t / (duration * 0.8), 1) * 0.05
+        ).with_effects([vfx.FadeIn(ANIM_IN)])
     return clip
+
+
+BRANDING_DEFAULTS = {"position": "bottom-right", "margin": 40, "opacity": 0.85,
+                     "max_height": 0.10, "scenes": "all"}
+CORNERS = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+
+def load_branding(spec: dict, spec_path: str, width: int = W, height: int = H) -> dict | None:
+    """Prepare the optional logo watermark once; None when absent or unusable."""
+    cfg = spec.get("branding")
+    if not cfg:
+        return None
+    cfg = {**BRANDING_DEFAULTS, **cfg}
+    if not cfg.get("logo"):
+        print("[warn] 'branding' block missing 'logo'; rendering without branding")
+        return None
+    from PIL import Image
+    import numpy as np
+    # Relative logo paths resolve against the spec's folder first, then the
+    # current directory (like image `src`).
+    logo_path = Path(cfg["logo"])
+    if not logo_path.is_absolute() and (Path(spec_path).parent / logo_path).exists():
+        logo_path = Path(spec_path).parent / logo_path
+    try:
+        img = Image.open(logo_path).convert("RGBA")
+    except OSError as e:
+        print(f"[warn] branding logo unreadable ({e}); rendering without branding")
+        return None
+    pos = cfg["position"]
+    if pos not in CORNERS:
+        print(f"[warn] unknown branding position {pos!r}; using bottom-right")
+        pos = "bottom-right"
+    # Scale to max_height (fraction of H), never wider than the frame allows,
+    # and keep at least 1px between the logo and the frame border.
+    margin = max(int(cfg["margin"]), 1)
+    scale = min(height * cfg["max_height"] / img.height, (width - 2 * margin) / img.width)
+    img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))),
+                     Image.LANCZOS)
+    x = margin if pos.endswith("left") else width - margin - img.width
+    y = margin if pos.startswith("top") else height - margin - img.height
+    # ImageClip turns the PNG alpha into a mask; with_opacity scales that mask.
+    logo = ImageClip(np.array(img)).with_opacity(cfg["opacity"]).with_position((x, y))
+    return {"clip": logo, "scenes": cfg["scenes"]}
+
+
+def apply_branding(clip, scene: dict, branding: dict, dur: float, size=(W, H)):
+    """Overlay the logo on a scene after its animation, so the logo holds
+    steady (no fade, zoom or slide) while the scene underneath animates."""
+    scenes = branding["scenes"]
+    if scenes != "all" and scene["type"] not in scenes:
+        return clip
+    # "center" matches concatenate_videoclips(method="compose"), which
+    # re-centres every scene, so the scene under the logo looks unchanged.
+    return CompositeVideoClip([clip.with_position("center"),
+                               branding["clip"].with_duration(dur)],
+                              size=size).with_duration(dur)
 
 
 def _ffmpeg_exe() -> str:
     from shutil import which
+
     p = which("ffmpeg")
     if p:
         return p
     import imageio_ffmpeg
+
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def _export_pptx(spec, scene_artifacts, output):
+def _export_pptx(spec, scene_artifacts, output, strict: bool = False):
+    """Write the deck next to `output`. Failures only warn unless `strict`
+    (PPTX-only mode, where the deck is the sole output)."""
     try:
         import pptx_export
+
         pptx_path = str(Path(output).with_suffix(".pptx"))
         pptx_export.build_pptx(spec, scene_artifacts, pptx_path)
         print(f"[done] {pptx_path} ({len(scene_artifacts)} slides)")
     except Exception as e:
+        if strict:
+            raise
         print(f"[warn] pptx export failed: {e}")
 
 
-def render(spec_path: str, output: str, workdir: str | None = None):
+def narration_config(spec: dict) -> dict | None:
+    """Resolve TTS settings once per render; None (all scenes silent) on a
+    bad provider setting, matching the missing-key degradation."""
+    try:
+        cfg = tts.resolve_config(spec)
+    except tts.TTSError as e:
+        print(f"[warn] {e} — rendering without narration")
+        return None
+    if cfg["provider"] != tts.DEFAULT_PROVIDER:
+        print(f"[tts] narration provider: {cfg['provider']}")
+    return cfg
+
+
+def scene_narration(
+    scene: dict, i: int, workdir: Path, voice_cfg: dict | None
+) -> tuple[str | None, float]:
+    """synth_narration, degrading to a silent scene when the provider's API
+    key is unset or the provider fails (any tts.TTSError)."""
+    if voice_cfg is None:
+        return None, 0.0
+    try:
+        return synth_narration(scene, workdir, voice_cfg)
+    except tts.TTSKeyMissing as e:
+        print(f"[warn] {e} — rendering scene {i} without narration")
+        return None, 0.0
+    except tts.TTSError as e:
+        print(
+            f"[warn] {voice_cfg.get('provider')} TTS failed: {e} — "
+            f"rendering scene {i} without narration"
+        )
+        return None, 0.0
+
+
+def collect_artifacts(
+    scene: dict, theme: dict, workdir: Path, audio_path: str | None
+) -> dict:
+    """Per-scene inputs for pptx_export.build_pptx. Reuses cached chart PNGs
+    and scene images in the workdir; generates them only when missing."""
+    art = {}
+    if audio_path:
+        art["narration_path"] = audio_path
+    img_path = scene_image_clip(scene, theme, workdir) if scene.get("image") else None
+    if scene["type"] == "composition":
+        width, height = theme.get("_resolution", (1920, 1080))
+        path = (
+            workdir
+            / f"background_{hashlib.sha1(json.dumps(scene.get('background', {}), sort_keys=True).encode()).hexdigest()[:10]}_{width}x{height}.png"
+        )
+        composition.background_frame(scene.get("background", {}), width, height).save(
+            path
+        )
+        art["composition_background"] = str(path)
+    if scene["type"] == "chart":
+        chart_png = chart_png_path(scene, workdir)
+        if not chart_png.exists():
+            render_chart_png(scene, theme, workdir)
+        art["chart_png"] = str(chart_png)
+    if img_path:
+        if scene.get("image", {}).get("placement", "background") in ("left", "right"):
+            art["image_png"] = img_path
+        else:
+            art["bg_image_png"] = img_path
+            scrim, _ = imggen.scrim_for_contrast(
+                img_path,
+                theme["fg"],
+                theme["bg"],
+                img_opacity=scene["image"].get("opacity", 0.25),
+            )
+            art["scrim"] = scrim
+    return art
+
+
+def render_pptx_only(spec: dict, output: str, workdir: Path):
+    """Build the deck from narration, chart and image artifacts alone: no
+    clips, segments or MP4."""
+    theme = spec["theme"]
+    voice_cfg = narration_config(spec)
+    scene_artifacts = []
+    t_cursor = 0.0
+    for i, scene in enumerate(spec["timeline"]):
+        audio_path, audio_dur = scene_narration(scene, i, workdir, voice_cfg)
+        dur = scene_duration(scene, audio_dur)
+        scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
+        print(
+            f"[scene {i + 1}] {scene['type']}: {dur:.2f}s starting at {t_cursor:.2f}s"
+            + (f" (narration {audio_dur:.2f}s)" if audio_path else "")
+        )
+        t_cursor += dur
+    _export_pptx(spec, scene_artifacts, output, strict=True)
+
+
+def render(
+    spec_path: str, output: str, workdir: str | None = None, render_video: bool = True
+):
     spec = load_spec(spec_path)
     theme = spec["theme"]
-    voice_cfg = spec.get("voice", {})
+    voice_cfg = narration_config(spec)
+    resolution = spec["meta"]["resolution"]
+    width, height = resolution["width"], resolution["height"]
+    if (width, height) not in composition.RESOLUTIONS:
+        raise ValueError("Unsupported resolution")
+    theme["_resolution"] = (width, height)
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
+    branding = load_branding(spec, spec_path, width, height)
+
+    if not render_video:
+        render_pptx_only(spec, output, workdir)
+        return
 
     video_clips, audios = [], []
     scene_artifacts = []
@@ -405,23 +708,32 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     seg_dir = workdir / "segments"
     if stream:
         seg_dir.mkdir(exist_ok=True)
-        print(f"[stream] long timeline ({len(spec['timeline'])} scenes); rendering per-scene segments")
+        print(
+            f"[stream] long timeline ({len(spec['timeline'])} scenes); rendering per-scene segments"
+        )
     for i, scene in enumerate(spec["timeline"]):
         stype = scene["type"]
-        builder = BUILDERS[stype]
-        if stype in ("image", "chart", "title", "bullets"):
+        audio_path, audio_dur = scene_narration(scene, i, workdir, voice_cfg)
+        # #6: narration first, so build_bullets knows when each per-bullet clip starts
+        if stype == "composition":
+            clip = composition.build_clip(scene, width, height)
+        elif stype in ("image", "chart", "title", "bullets"):
+            builder = BUILDERS[stype]
             clip = builder(scene, theme, workdir)
         else:
-            clip = builder(scene, theme)
+            clip = BUILDERS[stype](scene, theme)
 
-        try:
-            audio_path, audio_dur = synth_narration(scene, workdir, voice_cfg)
-        except RuntimeError as e:
-            if "MISTRAL_API_KEY" in str(e):
-                print(f"[warn] {e} — rendering scene {i} without narration")
-                audio_path, audio_dur = None, 0.0
-            else:
-                raise
+        if stype != "composition" and (width, height) != (W, H):
+            # Legacy scenes keep their established layout, fitted without distortion.
+            scaled = clip.resized(min(width / W, height / H))
+            clip = CompositeVideoClip(
+                [
+                    ColorClip((width, height), color=rgb(theme["bg"])),
+                    scaled.with_position("center"),
+                ],
+                size=(width, height),
+            )
+
 
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)
@@ -431,8 +743,11 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         # so encoding always sees constant frame dimensions (variable-size
         # streams decode as garbage/static in players).
         if scene.get("anim") in ("zoom-in", "kenburns"):
-            clip = CompositeVideoClip([clip.with_position("center")], size=(W, H))\
-                .with_duration(dur)
+            clip = CompositeVideoClip(
+                [clip.with_position("center")], size=(width, height)
+            ).with_duration(dur)
+        if branding:
+            clip = apply_branding(clip, scene, branding, dur, (width, height))
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))
@@ -447,24 +762,12 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         else:
             video_clips.append(clip)
 
-        art = {}
-        if audio_path:
-            art["narration_path"] = audio_path
-        img_path = scene_image_clip(scene, theme, workdir) if scene.get("image") else None
-        if stype == "chart":
-            art["chart_png"] = str(workdir / f"chart_{hashlib.sha1(json.dumps(scene).encode()).hexdigest()[:10]}.png")
-        if img_path:
-            if scene.get("image", {}).get("placement", "background") in ("left", "right"):
-                art["image_png"] = img_path
-            else:
-                art["bg_image_png"] = img_path
-                scrim, _ = imggen.scrim_for_contrast(
-                    img_path, theme["fg"], theme["bg"], img_opacity=scene["image"].get("opacity", 0.25))
-                art["scrim"] = scrim
-        scene_artifacts.append(art)
+        scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
 
-        print(f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
-              + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
+        print(
+            f"[scene {i + 1}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
+            + (f" (narration {audio_dur:.2f}s)" if audio_path else "")
+        )
         t_cursor += dur
 
     if stream:
@@ -473,21 +776,54 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         # make stream copy safe.
         seg_files = sorted(seg_dir.glob("seg_*.mp4"))
         concat_list = seg_dir / "concat.txt"
-        concat_list.write_text("".join("file '" + str(p.resolve()) + "'\n" for p in seg_files))
+        concat_list.write_text(
+            "".join("file '" + str(p.resolve()) + "'\n" for p in seg_files)
+        )
         ffmpeg = _ffmpeg_exe()
-        cmd = [ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
-               "-i", str(concat_list), "-c", "copy", output]
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_list),
+            "-c",
+            "copy",
+            output,
+        ]
         subprocess.run(cmd, check=True)
         # Mux narration: one pass with all audio offsets as inputs
         if audios:
             mixed = workdir / "narration_all.wav"
             CompositeAudioClip(audios).write_audiofile(str(mixed), logger=None)
             tmp = str(Path(output).with_suffix(".mux.mp4"))
-            subprocess.run([ffmpeg, "-y", "-loglevel", "error",
-                           "-i", output, "-i", str(mixed),
-                           "-c:v", "copy", "-c:a", "aac",
-                           "-map", "0:v", "-map", "1:a",
-                           "-shortest", tmp], check=True)
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    output,
+                    "-i",
+                    str(mixed),
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1:a",
+                    "-shortest",
+                    tmp,
+                ],
+                check=True,
+            )
             Path(tmp).replace(output)
         print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps, streamed)")
         _export_pptx(spec, scene_artifacts, output)
@@ -496,8 +832,9 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     final = concatenate_videoclips(video_clips, method="compose")
     if audios:
         final = final.with_audio(CompositeAudioClip(audios))
-    final.write_videofile(output, fps=fps, codec="libx264",
-                          audio_codec="aac", logger=None)
+    final.write_videofile(
+        output, fps=fps, codec="libx264", audio_codec="aac", logger=None
+    )
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
 
     _export_pptx(spec, scene_artifacts, output)
@@ -508,6 +845,25 @@ if __name__ == "__main__":
     p.add_argument("spec")
     p.add_argument("-o", "--output", default="output/video.mp4")
     p.add_argument("--workdir", default=None)
+    p.add_argument(
+        "--pptx-only",
+        action="store_true",
+        help="write only the .pptx (narration, images, charts); skip video encoding",
+    )
+    p.add_argument(
+        "--validate",
+        action="store_true",
+        help="only check the spec against src/schema.json; exit 0 if valid, 1 if not",
+    )
     args = p.parse_args()
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    render(args.spec, args.output, args.workdir)
+    try:
+        if args.validate:
+            spec = load_spec(args.spec)
+            n = len(spec["timeline"])
+            print(f"{args.spec}: OK ({n} scene{'s' if n != 1 else ''})")
+            sys.exit(0)
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        render(args.spec, args.output, args.workdir, render_video=not args.pptx_only)
+    except spec_validation.SpecValidationError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)

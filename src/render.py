@@ -123,6 +123,12 @@ def synth_narration(
             )
             tmp.replace(out)  # never leave a half-written clip in the cache
         paths.append(str(out))
+    if per_bullet:
+        # #6: when each bullet's clip starts in the joined track, from the
+        # decoded durations (same measure as the timeline), as a running sum.
+        durs = [tts.audio_duration(p) for p in paths]
+        scene["_bullet_starts"] = [sum(durs[:i]) for i in range(len(durs))]
+        print("[bullets] reveal at " + ", ".join(f"{t:.2f}s" for t in scene["_bullet_starts"]))
     if len(paths) == 1:
         return paths[0], tts.audio_duration(paths[0])
     combined = (
@@ -360,15 +366,18 @@ def build_bullets(scene, theme, workdir=None):
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
     stagger = scene.get("stagger", 0.4)
+    starts = scene.get("_bullet_starts")  # narration_per_bullet clip starts (#6)
+    if not starts or len(starts) != n:
+        starts = None
     for i, item in enumerate(scene["items"]):
         bullet = _left_text_clip("• " + item, theme, b_size, max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
         bullet = bullet.with_position((x, y))
-        if stagger > 0:
+        if starts or stagger > 0:
             if bullet.mask is None:
                 bullet = bullet.with_mask()
             bullet = bullet.with_mask(bullet.mask.with_effects([vfx.FadeIn(BULLET_FADE)]))
-            bullet = bullet.with_start(i * stagger)
+            bullet = bullet.with_start(starts[i] if starts else i * stagger)
         clips.append(bullet)
 
     return CompositeVideoClip(clips, size=(W, H))
@@ -636,6 +645,8 @@ def render(
         )
     for i, scene in enumerate(spec["timeline"]):
         stype = scene["type"]
+        audio_path, audio_dur = scene_narration(scene, i, workdir, voice_cfg)
+        # #6: narration first, so build_bullets knows when each per-bullet clip starts
         if stype == "composition":
             clip = composition.build_clip(scene, width, height)
         elif stype in ("image", "chart", "title", "bullets"):
@@ -655,7 +666,6 @@ def render(
                 size=(width, height),
             )
 
-        audio_path, audio_dur = scene_narration(scene, i, workdir, voice_cfg)
 
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)

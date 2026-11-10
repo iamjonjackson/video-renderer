@@ -1,8 +1,11 @@
 """PPTX chart export: native editable charts, theming and PNG fallback."""
 
+import subprocess
 import sys
 import tempfile
 import unittest
+import wave
+import zipfile
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -100,6 +103,48 @@ class ChartExportTests(unittest.TestCase):
         slide, log = self.export(chart_scene(chart_type="scatter"))
         self.assertEqual(len(self.pictures(slide)), 1)
         self.assertIn("no native pptx chart for chart_type 'scatter'", log)
+
+
+class NarrationExportTests(unittest.TestCase):
+    """Narration clips embed whatever container the TTS provider produced."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        wav = self.dir / "n.wav"
+        with wave.open(str(wav), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(24000)
+            w.writeframes(b"\x00\x00" * 12000)  # 0.5 s
+        self.wav = wav
+        self.mp3 = self.dir / "n.mp3"
+        import imageio_ffmpeg
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error",
+                        "-i", str(wav), "-codec:a", "libmp3lame", str(self.mp3)], check=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def media_types(self, audio):
+        out = self.dir / "deck.pptx"
+        spec = {"theme": THEME, "timeline": [{"type": "title", "text": "Hi", "narration": "Hi"}]}
+        with redirect_stdout(StringIO()):
+            pptx_export.build_pptx(spec, [{"narration_path": str(audio)}], str(out))
+        with zipfile.ZipFile(out) as z:
+            types = z.read("[Content_Types].xml").decode()
+            names = z.namelist()
+        return types, names
+
+    def test_wav_narration_embeds_as_wav(self):
+        types, names = self.media_types(self.wav)
+        self.assertIn('ContentType="audio/wav"', types)
+        self.assertTrue(any(n.startswith("ppt/media/") and n.endswith(".wav") for n in names))
+
+    def test_mp3_narration_embeds_as_mpeg(self):
+        types, names = self.media_types(self.mp3)
+        self.assertIn('ContentType="audio/mpeg"', types)
+        self.assertTrue(any(n.startswith("ppt/media/") and n.endswith(".mp3") for n in names))
 
 
 if __name__ == "__main__":

@@ -1,13 +1,15 @@
 # video-renderer
 
 Declarative video generation pipeline: describe scenes in a JSON spec, get an
-MP4 with animated visuals and Mistral TTS (Voxtral) voiceover.
+MP4 with animated visuals and a TTS voiceover from Mistral Voxtral (default),
+Google Gemini TTS or ElevenLabs.
 
 ## How it works
 
 1. You provide a **spec** (JSON) — a timeline of scenes with text, charts,
    images, and optional narration.
-2. The renderer synthesizes narration per scene via the Mistral TTS API,
+2. The renderer synthesizes narration per scene via the selected TTS provider
+   (see [Narration providers](#narration-providers)),
    probes each clip's duration, and sizes each scene to its audio
    (audio-driven timeline). Explicit `duration` overrides when you want a
    scene to linger.
@@ -21,7 +23,7 @@ cd video-renderer
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env     # then edit .env and add your MISTRAL_API_KEY
+cp .env.example .env     # then edit .env and add a provider key (e.g. MISTRAL_API_KEY)
 set -a; source .env; set +a   # load env vars (or use dotenv in your shell)
 
 # Final videos go to ./output, intermediate render files to ./temp
@@ -30,11 +32,16 @@ python3 src/render.py samples/sample-spec.json -o output/demo.mp4
 
 Notes:
 
-- `.env` is gitignored; `.env.example` documents the variables.
+- `.env` is gitignored; `.env.example` documents the variables. Put real
+  keys only in `.env`, never in the tracked `.env.example`.
+- MoviePy loads the nearest `.env` on import (python-dotenv), without
+  overriding variables already set. To test the no-key path with keys in
+  `.env`, set the variable to empty, e.g. `GOOGLE_API_KEY= TTS_PROVIDER=google ...`.
 - `output/` (final videos) and `temp/` (TTS/image caches, intermediate
   artifacts) are gitignored except their `.gitkeep` placeholders.
-- Without `MISTRAL_API_KEY`, scenes render silently and AI image blocks are
-  skipped with a warning — the pipeline never hard-fails on missing AI.
+- Without the selected provider's key (or if the provider errors), scenes
+  render silently with a warning; without `MISTRAL_API_KEY`, AI image blocks
+  are skipped with a warning — the pipeline never hard-fails on missing AI.
 - System ffmpeg is used if installed; otherwise `imageio-ffmpeg` bundles one.
 
 ## Frame: local visual Studio
@@ -268,8 +275,9 @@ by construction) with the image in a bordered panel.
 
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
   `padding` (default 1.0s) adds a guaranteed tail buffer after narration.
-- **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a
-  cloned `voice_id` from a 2–3s audio sample.
+- **Voice** (Mistral): built-in voice slugs (list via `GET /v1/audio/voices`)
+  or a cloned `voice_id` from a 2–3s audio sample. Other providers take their
+  voice from `meta.tts` — see [Narration providers](#narration-providers).
 - Full contract: `src/schema.json` (JSON Schema).
 
 See `samples/sample-spec.json` for a complete example.
@@ -277,15 +285,92 @@ See `samples/sample-spec.json` for a complete example.
 ## Files
 
 - `src/render.py` — spec → MP4 renderer (MoviePy + Matplotlib)
-- `src/tts.py` — Mistral Voxtral TTS REST client (`/v1/audio/speech`)
+- `src/tts.py` — TTS contract + provider dispatch; Mistral Voxtral REST client (`/v1/audio/speech`)
+- `src/tts_google.py` — Google Gemini TTS adapter (`generateContent`, PCM/WAV)
+- `src/tts_elevenlabs.py` — ElevenLabs adapter (`/v1/text-to-speech/{voice_id}`, MP3)
 - `src/schema.json` — JSON Schema for the spec
 - `src/themes/presets.py` — dark/light color presets
 - `demos/` — rendered example videos from `samples/sample-spec.json`
 
 ## Notes
 
-- TTS is skipped gracefully (with a warning) when `MISTRAL_API_KEY` is unset.
+- TTS is skipped gracefully (with a warning) when the selected provider's
+  key is unset or the provider fails (quota, network, rejected voice).
 - Never commit API keys; pass via environment only.
+
+## Narration providers
+
+| `TTS_PROVIDER` | Key env var | Output | Default voice / model |
+|---|---|---|---|
+| `mistral` (default) | `MISTRAL_API_KEY` | WAV (or `voice.format`) | `voice.slug`, else `gb_jane_neutral` fallbacks / `voxtral-mini-tts-2603` |
+| `google` | `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) | WAV | `Kore` / `gemini-3.8-flash-lite-tts` |
+| `elevenlabs` | `ELEVENLABS_API_KEY` | MP3 | first usable voice on your account / `eleven_multilingual_v2` |
+
+Selection order: the `TTS_PROVIDER` env var, then the spec's
+`"meta": {"tts": {"provider": ...}}`, then `mistral`. With neither set,
+behaviour is unchanged. Per-spec settings for a provider:
+
+```json
+"meta": { "tts": { "provider": "google", "voice": "Charon",
+                   "style": "Read aloud in a neutral, warm narration voice" } }
+```
+
+`meta.tts.voice` / `model` / `style` only apply when the effective provider
+matches `meta.tts.provider`, and the top-level `voice` block only applies to
+Mistral, so overriding with `TTS_PROVIDER` never sends one provider's voice
+to another. Env overrides: `GOOGLE_TTS_VOICE`, `GOOGLE_TTS_MODEL`,
+`GOOGLE_TTS_STYLE`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL`.
+
+Narration clips are cached in the workdir as
+`narr_<provider>_<hash>_<n>.<ext>`, where the hash covers the text,
+provider, voice, model and style, so switching provider or voice regenerates
+audio rather than replaying another provider's clips. (Caches from before
+this change are regenerated once.) AI image generation still uses Mistral.
+
+### Getting a Google (Gemini API) key
+
+- Create a key at [Google AI Studio](https://aistudio.google.com/apikey)
+  and set `GOOGLE_API_KEY=...`. No credit card is needed for the free tier.
+- Gemini TTS models are available on the Gemini API free tier within
+  per-project rate limits (requests per minute/day). Check the current
+  allowances on the [rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)
+  page and [pricing](https://ai.google.dev/gemini-api/docs/pricing) page; on
+  the free tier, Google may use prompts to improve its products. Image
+  generation is not on the free tier (and this repo's images use Mistral anyway).
+- The default model is `gemini-3.8-flash-lite-tts`; if it is unavailable to
+  your key, the adapter tries `gemini-3.8-flash-tts`, then
+  `gemini-3.1-flash-tts-preview`, also moving on when a model's free-tier
+  quota is exhausted (HTTP 429). Quotas are per model and small (one test
+  project hit a 10-request limit on `gemini-3.8-flash-lite-tts`), and each
+  narration clip is one request, so a long spec can exceed them; scenes
+  past the limit render silently and are synthesized on the next run, since
+  finished clips stay cached. Older models such as
+  `gemini-2.5-flash-preview-tts` are being retired; pin a model with
+  `GOOGLE_TTS_MODEL` or `meta.tts.model` if you need one.
+- Voices are Gemini's prebuilt voice names (e.g. `Kore`, `Charon`, `Puck`);
+  delivery is steered by the `style` prompt.
+
+### Getting an ElevenLabs key
+
+- Sign up at [elevenlabs.io](https://elevenlabs.io) and create a key under
+  [API keys](https://elevenlabs.io/app/settings/api-keys); set
+  `ELEVENLABS_API_KEY=...`. If you restrict the key's permissions, allow
+  Text to Speech and Voices (read).
+- **Free tier: 10,000 credits/month** (about 10 minutes of audio with
+  `eleven_multilingual_v2`; Flash/Turbo models use about half the credits per
+  character — set `ELEVENLABS_MODEL=eleven_flash_v2_5`).
+- **Free tier is non-commercial only and requires attribution**: credit
+  ElevenLabs (e.g. "Voice: elevenlabs.io") in the video or its description.
+  It is fine for coursework and demos; monetized output needs a paid plan
+  (Starter and up include a commercial licence). See
+  [ElevenLabs pricing](https://elevenlabs.io/pricing) and terms.
+- **Voice availability on free keys**: free-tier keys cannot use Voice
+  Library voices through the API, and ElevenLabs' legacy Default voices are
+  only on accounts created before March 2026 and are retired on
+  31 December 2026 ([details](https://elevenlabs.io/docs/help-center/product/voice-customization/my-voices/what-are-default-voices)).
+  The adapter picks the first usable voice from your account's `/v1/voices`
+  (preferring a British premade voice); set `ELEVENLABS_VOICE_ID` to pin one.
+  If no voice is usable, scenes render silently with a warning.
 
 ### Getting a Mistral API key
 

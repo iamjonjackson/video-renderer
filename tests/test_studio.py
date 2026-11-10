@@ -36,6 +36,19 @@ class ValidationTests(unittest.TestCase):
         self.assertNotIn("narration", result["timeline"][0])
         self.assertIn("narration", spec["timeline"][0])
 
+    def test_silent_copy_drops_tts_provider_settings(self):
+        spec = copy.deepcopy(BASE)
+        spec["meta"]["tts"] = {"provider": "google", "voice": "Kore"}
+        result = silent_spec(validate_spec(spec))
+        self.assertNotIn("tts", result["meta"])
+        self.assertEqual(spec["meta"]["tts"]["provider"], "google")
+
+    def test_rejects_unknown_tts_fields(self):
+        spec = copy.deepcopy(BASE)
+        spec["meta"]["tts"] = {"provider": "google", "api_key": "never"}
+        with self.assertRaises(SpecError):
+            validate_spec(spec)
+
     def test_converted_bullet_notes_keep_all_narration(self):
         spec = {
             "meta": {"title": "Notes"},

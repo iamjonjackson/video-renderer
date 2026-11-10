@@ -52,7 +52,11 @@ def validate_spec(value):
     object_fields(value, ("meta", "theme", "timeline", "voice"), "Project")
     spec = copy.deepcopy(value)
     meta = spec.setdefault("meta", {})
-    object_fields(meta, ("title", "fps", "resolution"), "Project settings")
+    object_fields(meta, ("title", "fps", "resolution", "tts"), "Project settings")
+    if "tts" in meta:
+        object_fields(meta["tts"], ("provider", "voice", "model", "style"), "Narration")
+        for key, item in meta["tts"].items():
+            text(item, f"Narration {key}", 200)
     text(meta.get("title", ""), "Project title", 100)
     if meta.get("fps", 30) not in (24, 30):
         raise SpecError("Frame rate: choose 24 or 30 fps.")
@@ -185,6 +189,7 @@ def validate_spec(value):
 def silent_spec(spec):
     result = copy.deepcopy(spec)
     result.pop("voice", None)
+    result.get("meta", {}).pop("tts", None)
     for scene in result["timeline"]:
         scene.pop("narration", None)
         scene.pop("narration_per_bullet", None)

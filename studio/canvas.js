@@ -1,3 +1,5 @@
+function drawCanvasImage(node,item){const image=document.createElement('img');image.src=item.src;image.alt=item.alt;image.draggable=false;image.style.cssText=`width:100%;height:100%;object-fit:${item.fit||'cover'};pointer-events:none;display:block`;node.replaceChildren(image);}
+const canvasFontNames={sans:"Frame Sans",serif:"Frame Serif",mono:"Frame Mono"};
 /* Direct canvas editing. Normalised positions are the exported source of truth. */
 let selectedElement = null;
 let drag = null;
@@ -78,7 +80,7 @@ for (const edge of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
 		const start = { x: event.clientX, y: event.clientY };
 		const bounds = $("canvas").getBoundingClientRect();
 		const apply = () => {
-			const node = $("canvas").querySelector(`[data-id="${item.id}"]`);
+			const node = canvasNode(item.id);
 			if (node) positionNode(node, item);
 			syncResizeHandles();
 		};
@@ -135,7 +137,7 @@ for (const edge of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
 				vectors[event.key][1] * multiplier,
 			),
 		);
-		positionNode($("canvas").querySelector(`[data-id="${item.id}"]`), item);
+		positionNode(canvasNode(item.id), item);
 		syncResizeHandles();
 		save();
 		announce("Element resized.");
@@ -143,6 +145,7 @@ for (const edge of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
 	$("resize-handles").append(handle);
 }
 const paths = {
+ check:"M5 12l4 4 10-10",star:"m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z",info:"M12 8h.01 M12 11v6 M21 12a9 9 0 1 0-18 0 9 9 0 0 0 18 0",target:"M21 12a9 9 0 1 0-18 0 9 9 0 0 0 18 0 M17 12a5 5 0 1 0-10 0 5 5 0 0 0 10 0 M12 12h.01",heart:"M12 20 4 12a5 5 0 0 1 8-6 5 5 0 0 1 8 6z",
 	scene: "M4 5h16v14H4z M8 9h8 M8 13h6",
 	chart: "M5 19V9 M12 19V5 M19 19v-7 M3 21h18",
 	moon: "M20 14A8 8 0 0 1 10 4a8 8 0 1 0 10 10Z",
@@ -307,6 +310,7 @@ function canvasTemplate(kind) {
 function currentScene() {
 	return project.timeline[selected];
 }
+function canvasNode(id){return [...$("canvas").querySelectorAll(".canvas-element")].find(node=>node.dataset.id===id);}
 function itemById() {
 	return currentScene().elements?.find((item) => item.id === selectedElement);
 }
@@ -412,6 +416,8 @@ function stopPreview() {
 	if ($("preview-motion")) $("preview-motion").textContent = "Preview motion";
 }
 function drawCanvas() {
+ if(typeof stopProjectPlayback==="function" && typeof projectFrame!=="undefined")stopProjectPlayback();
+ if(typeof stopCanvasPlayback === "function" && typeof motionFrame !== "undefined")stopCanvasPlayback(true);
 	stopInterfaceMotion($("canvas"));
 	chartEditing = null;
 	if (contentScene && contentScene !== currentScene()) {
@@ -468,7 +474,7 @@ function drawCanvas() {
 		node.setAttribute("role", "button");
 		node.setAttribute(
 			"aria-label",
-			`${item.text || item.labels?.join(" ") || item.shape} ${item.type} element. Use arrow keys to move; Enter to edit.`,
+			`${item.text || item.labels?.join(" ") || item.icon || item.shape} ${item.type} element. Use arrow keys to move; Enter to edit.`,
 		);
 		node.setAttribute("aria-pressed", String(selectedElement === item.id));
 		positionNode(node, item);
@@ -478,11 +484,12 @@ function drawCanvas() {
 			node.style.whiteSpace = "pre-wrap";
 			node.style.fontSize = `${item.font_size * 100}cqh`;
 			node.style.fontWeight = item.bold ? "700" : "400";
+ node.style.fontFamily=`"${canvasFontNames[item.font_family||"sans"]}"`;
 			node.style.textAlign = item.align || "left";
-		} else if (item.type === "shape") {
+		} else if(item.type==="image"){drawCanvasImage(node,item);} else if (item.type === "shape") {
 			node.style.background = item.color;
 			styleShape(node,item);
-		} else drawChart(node, item);
+		} else if(item.type==="icon"){node.append(canvasIcon(item.icon));node.classList.add("canvas-icon");}else drawChart(node, item);
 		if (item.type === "chart")
 			node.setAttribute(
 				"aria-label",
@@ -582,67 +589,25 @@ function drawCanvas() {
 	fitCanvas();
 	refreshSceneThumbnails();
 }
-function drawChart(node, item) {
-	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-	svg.setAttribute("viewBox", "0 0 400 240");
-	svg.setAttribute("aria-hidden", "true");
-	const max = Math.max(1, ...item.values.map(Math.abs));
- const low=Math.min(0,...item.values),high=Math.max(0,...item.values),span=high-low||1,baseline=190-(0-low)/span*160;
-	const ns = svg.namespaceURI;
-	if (["pie","doughnut"].includes(item.chart_type)) {
-		let angle = 0;
-		const total = item.values.reduce((a, b) => a + b, 0);
-		item.values.forEach((value, i) => {
-			const end = angle + (value / total) * Math.PI * 2;
-			const path = document.createElementNS(ns, "path");
-			const x1 = 200 + 85 * Math.cos(angle),
-				y1 = 100 + 85 * Math.sin(angle),
-				x2 = 200 + 85 * Math.cos(end),
-				y2 = 100 + 85 * Math.sin(end);
-			path.setAttribute(
-				"d",
-				`M200 100 L${x1} ${y1} A85 85 0 ${end - angle > Math.PI ? 1 : 0} 1 ${x2} ${y2} Z`,
-			);
-			path.setAttribute("fill", item.color);
-			path.setAttribute("opacity", String(1 - i * 0.08));
-			svg.append(path);
-			angle = end;
-		});
- if(item.chart_type==="doughnut"){const clip=document.createElementNS(ns,'clipPath'),path=document.createElementNS(ns,'path');const id='ring-'+crypto.randomUUID();clip.id=id;path.setAttribute('d','M115 15h170v170H115z M248 100a48 48 0 1 0-96 0a48 48 0 1 0 96 0');path.setAttribute('clip-rule','evenodd');clip.append(path);svg.prepend(clip);svg.querySelectorAll(':scope > path').forEach(slice=>slice.setAttribute('clip-path',`url(#${id})`));}
-	} else {
- if(["line","area"].includes(item.chart_type)){const line=document.createElementNS(ns,"path");const points=item.values.map((v,i)=>`${35+i*(330/item.values.length)+15},${190-(v-low)/span*160}`);line.setAttribute("d","M"+points.join(" L")+(item.chart_type==="area"?` L${35+(item.values.length-1)*(330/item.values.length)+15},${baseline} L50,${baseline} Z`:""));line.setAttribute("fill",item.chart_type==="area"?item.color:"none");line.setAttribute("fill-opacity",".3");line.setAttribute("stroke",item.color);line.setAttribute("stroke-width","3");svg.append(line);}
-		item.values.forEach((v, i) => {
-			const x = 35 + i * (330 / item.values.length);
-			const height = Math.abs(v)/span*160;
-			const shape = document.createElementNS(
-				ns,
-				["line","area"].includes(item.chart_type) ? "circle" : "rect",
-			);
-			if (["line","area"].includes(item.chart_type)) {
-				shape.setAttribute("cx", String(x + 15));
-				shape.setAttribute("cy", String(190-(v-low)/span*160));
-				shape.setAttribute("r", "5");
-			} else {
-				shape.setAttribute("x", String(x));
-				shape.setAttribute("y", String(v>=0?baseline-height:baseline));
-				shape.setAttribute("width", String(220 / item.values.length));
-				shape.setAttribute("height", String(height));
-			}
-			shape.setAttribute("fill", item.color);
-			if(item.chart_type==="horizontal"){shape.setAttribute("x",String(100+(Math.min(0,v)-low)/span*280));shape.setAttribute("y",String(10+i*180/item.values.length));shape.setAttribute("width",String(Math.abs(v)/span*280));shape.setAttribute("height",String(130/item.values.length));}
-			svg.append(shape);
-		});
- }
-	item.labels.forEach((label, i) => {
-		const text = document.createElementNS(ns, "text");
-		text.setAttribute("x", item.chart_type==="horizontal"?"5":String(35 + (i * 330) / item.labels.length));
-		text.setAttribute("y",item.chart_type==="horizontal"?String(30+i*180/item.labels.length):"222");
-		text.setAttribute("fill", item.color);
-		text.setAttribute("font-size", "13");
-		text.textContent = label;
-		svg.append(text);
-	});
-	node.append(svg);
+function drawChart(node,item,progress=1){
+ const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 400 240');svg.setAttribute('preserveAspectRatio','none');svg.setAttribute('aria-hidden','true');svg.dataset.chartProgress=progress;
+ const create=(tag,attrs)=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));svg.append(n);return n;};
+ const p=Math.max(0,Math.min(1,progress)),N=item.values.length,low=Math.min(0,...item.values),high=Math.max(0,...item.values),span=high-low||1,baseline=190-(0-low)/span*160;
+ if(['pie','doughnut'].includes(item.chart_type)){
+  const total=item.values.reduce((a,b)=>a+b,0);let angle=0;
+  for(let i=0;i<N;i++){const end=angle+item.values[i]/total*Math.PI*2,shown=Math.min(end,p*Math.PI*2);if(shown>angle){const x1=200+85*Math.cos(angle),y1=100+85*Math.sin(angle),x2=200+85*Math.cos(shown),y2=100+85*Math.sin(shown),large=shown-angle>Math.PI?1:0;let d=`M200 100 L${x1} ${y1} A85 85 0 ${large} 1 ${x2} ${y2} Z`;if(shown-angle>=Math.PI*2-.00001)d='M285 100 A85 85 0 1 1 115 100 A85 85 0 1 1 285 100 Z';const path=create('path',{d,fill:item.color,opacity:1-i*.08});
+   if(item.chart_type==='doughnut'){const id='ring-'+crypto.randomUUID(),clip=create('clipPath',{id}),ring=document.createElementNS(ns,'path');ring.setAttribute('d','M115 15h170v170H115z M248 100a48 48 0 1 0-96 0a48 48 0 1 0 96 0');ring.setAttribute('clip-rule','evenodd');clip.append(ring);path.setAttribute('clip-path',`url(#${id})`);}}
+   if(p>=end/(Math.PI*2)&&item.values[i]>0){const middle=(angle+end)/2,text=create('text',{x:200+62*Math.cos(middle),y:100+62*Math.sin(middle),'text-anchor':'middle',fill:'#191925','font-size':12});text.textContent=`${Math.round(item.values[i]/total*100)}%`;}
+   angle=end;
+  }
+ }else if(['line','area'].includes(item.chart_type)){
+  const points=item.values.map((v,i)=>[50+i*330/N,190-(v-low)/span*160]),segments=Math.max(1,N-1),travel=p*segments,count=Math.min(N-1,Math.floor(travel)),part=travel-count,shown=points.slice(0,count+1);
+  if(count<N-1&&part>0)shown.push([points[count][0]+(points[count+1][0]-points[count][0])*part,points[count][1]+(points[count+1][1]-points[count][1])*part]);
+  if(shown.length>1){const path='M'+shown.map(v=>v.join(',')).join(' L');if(item.chart_type==='area')create('path',{d:path+` L${shown.at(-1)[0]},${baseline} L50,${baseline} Z`,fill:item.color,opacity:.22});create('path',{d:path,fill:'none',stroke:item.color,'stroke-width':3,'stroke-linecap':'round','stroke-linejoin':'round'});}
+  points.forEach(([x,y],i)=>create('circle',{cx:x,cy:y,r:5*(p===1?1:Math.max(0,Math.min(1,(p-i/segments)/.12))),fill:item.color}));
+ }else item.values.forEach((v,i)=>{const height=Math.abs(v)/span*160*p;if(item.chart_type==='horizontal')create('rect',{x:100+(Math.min(0,v*p)-low)/span*280,y:10+i*180/N,width:Math.abs(v)/span*280*p,height:130/N,fill:item.color});else create('rect',{x:35+i*330/N,y:v>=0?baseline-height:baseline,width:220/N,height,fill:item.color});});
+ item.labels.forEach((label,i)=>{const text=create('text',{x:item.chart_type==='horizontal'?5:35+i*330/N,y:item.chart_type==='horizontal'?30+i*180/N:222,fill:item.color,'font-size':13});text.textContent=label;});
+ node.replaceChildren(svg);
 }
 function drawSelection() {
 	syncResizeHandles();
@@ -775,6 +740,7 @@ function syncCanvasTools() {
 	])
 		$(id).disabled = !composition;
 	$("scene-duration").value = scene.duration || 4;
+ $("scene-transition").value=scene.transition?.effect||"none";
 	$("resolution").value =
 		`${project.meta?.resolution?.width || 1920}x${project.meta?.resolution?.height || 1080}`;
 	if (composition) {
@@ -792,6 +758,8 @@ function syncCanvasTools() {
 	}
 	const item = itemById();
 	$("element-options").hidden = !item;
+ $("element-font").disabled=item?.type!=="text";$("element-font").value=item?.font_family||"sans";
+ $("image-fit-control").hidden=item?.type!=="image";$("image-alt-control").hidden=item?.type!=="image";$("image-fit").value=item?.fit||"cover";$("image-alt").value=item?.alt||"";
 	if (!item) $("resize-handles").hidden = true;
 	if (!item) {
 		if ($("context-tools").matches(":popover-open"))
@@ -805,6 +773,8 @@ function syncCanvasTools() {
 	$("element-options").style.top =
 		`${canvasBounds.top - wrapBounds.top + item.y * canvasBounds.height}px`;
 	$("selection-kind").textContent = item.type;
+ $("icon-control").hidden=item.type!=="icon";if(item.type==="icon")$("icon-kind").value=item.icon;
+ if(typeof syncMotionControls === "function")syncMotionControls();
  $("shape-control").hidden=item.type!=="shape";
  if(item.type==="shape")$("shape-kind").value=item.shape;
 	$("element-color").value = item.color;
@@ -858,7 +828,7 @@ for (const type of ["text", "chart", "shape"])
 		scene.elements.push(item);
 		selectedElement = item.id;
 		update();
-		const addedNode = $("canvas").querySelector(`[data-id="${item.id}"]`);
+		const addedNode = canvasNode(item.id);
 		addedNode.focus();
 		enterInterface(addedNode, { distance: 6, duration: 190, scale: 0.98 });
 		announce(`${type} added. Chart values are example data.`);
@@ -874,6 +844,7 @@ function changeItem(action) {
 	drawCanvas();
 	if (focusId) $(focusId)?.focus({ preventScroll: true });
 }
+$("icon-kind").onchange=()=>changeItem(item=>{item.icon=$("icon-kind").value;});
 $("shape-kind").onchange=()=>changeItem(item=>{item.shape=$("shape-kind").value;});
 $("element-color").oninput = () =>
 	changeItem((i) => {
@@ -1012,9 +983,10 @@ function finishInlineEditing() {
 	});
 }
 function beginInlineEditing(item) {
+ stopCanvasPlayback(true);
 	finishInlineEditing();
 	selectElement(item.id);
-	const node = $("canvas").querySelector(`[data-id="${item.id}"]`);
+	const node = canvasNode(item.id);
 	if (!node) return;
 	inlineEditing = { node, item, original: item.text };
 	node.contentEditable = "plaintext-only";
@@ -1041,7 +1013,8 @@ function beginInlineEditing(item) {
 	);
 }
 function beginChartEditing(item) {
-	const node = $("canvas").querySelector(`[data-id="${item.id}"]`);
+ stopCanvasPlayback(true);
+	const node = canvasNode(item.id);
 	if (!node) return;
 	if (chartEditing?.item === item) {
 		node.querySelector("input")?.focus();
@@ -1168,7 +1141,8 @@ function openContent(item, notes = false) {
 		beginInlineEditing(item);
 		return;
 	}
-	if (!notes && item.type === "shape") {
+	if(!notes && item.type==="icon"){showElementOptions();$("icon-kind").focus();return;}
+ if (!notes && item.type === "shape") {
 		showElementOptions();
         $("shape-kind").focus();
 		return;
@@ -1290,3 +1264,8 @@ drawScenes();
 drawCanvas();
 drawMeta();
 $("project-title").value = project.meta?.title || "Untitled project";
+
+$('add-icon').onclick=()=>{
+ convertScene();if(currentScene().elements.length>=16){notice('A canvas supports at most 16 elements.');return;}
+ const item={id:crypto.randomUUID(),type:'icon',icon:'star',x:.1,y:.1,w:.12,h:.18,color:'#bba5ff'};currentScene().elements.push(item);selectedElement=item.id;update();showElementOptions();
+};

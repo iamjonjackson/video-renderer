@@ -10,7 +10,11 @@
     <script src="/app.js" defer></script>
     <script src="/thumbnails.js" defer></script>
     <script src="/scene-menus.js" defer></script>
+    <script src="/canvas-icons.js" defer></script>
     <script src="/canvas.js" defer></script>
+    <script src="/canvas-assets.js" defer></script>
+    <script src="/canvas-motion.js" defer></script>
+    <script src="/project-playback.js" defer></script>
     <script src="/authoring.js" defer></script>
   </head>
   <body>
@@ -76,13 +80,53 @@
               Drag scenes to reorder · Backspace to delete
             </p>
             <ol id="scenes" class="scene-list"></ol>
-            <div id="scene-picker" class="scene-menu" popover="manual" role="dialog" aria-label="Add a scene">
-              <div class="options-heading"><strong>Add a scene</strong><button class="button subtle" id="scene-picker-close" aria-label="Close scene chooser">Close</button></div>
-              <button class="button" data-scene-type="blank">Blank canvas</button><button class="button" data-scene-type="title">Title</button><button class="button" data-scene-type="quote">Quote</button><button class="button" data-scene-type="data">Data story</button><button class="button" data-scene-type="compare">Comparison</button><button class="button" data-scene-type="closing">Closing</button>
+            <div
+              id="scene-picker"
+              class="scene-menu"
+              popover="manual"
+              role="dialog"
+              aria-label="Add a scene"
+            >
+              <div class="options-heading">
+                <strong>Add a scene</strong
+                ><button
+                  class="button subtle"
+                  id="scene-picker-close"
+                  aria-label="Close scene chooser"
+                >
+                  Close
+                </button>
+              </div>
+              <button class="button" data-scene-type="blank">
+                Blank canvas</button
+              ><button class="button" data-scene-type="title">Title</button
+              ><button class="button" data-scene-type="quote">Quote</button
+              ><button class="button" data-scene-type="data">Data story</button
+              ><button class="button" data-scene-type="compare">
+                Comparison</button
+              ><button class="button" data-scene-type="closing">Closing</button>
             </div>
-            <div id="scene-options" class="scene-menu" popover="manual" role="dialog" aria-label="Scene options">
-              <div class="options-heading"><strong id="scene-options-title">Scene options</strong><button class="button subtle" id="scene-options-close" aria-label="Close scene options">Close</button></div>
-              <button id="scene-edit" class="button">Edit on canvas</button><button id="scene-delete" class="button danger">Delete scene</button>
+            <div
+              id="scene-options"
+              class="scene-menu"
+              popover="manual"
+              role="dialog"
+              aria-label="Scene options"
+            >
+              <div class="options-heading">
+                <strong id="scene-options-title">Scene options</strong
+                ><button
+                  class="button subtle"
+                  id="scene-options-close"
+                  aria-label="Close scene options"
+                >
+                  Close
+                </button>
+              </div>
+              <button id="scene-edit" class="button">Edit on canvas</button
+              ><button id="scene-delete" class="button danger">
+                Delete scene
+              </button>
             </div>
           </aside>
           <section
@@ -96,7 +140,14 @@
               <div class="tool-group" aria-label="Add element">
                 <button class="button outlined" id="add-text">Text</button
                 ><button class="button outlined" id="add-chart">Chart</button
-                ><button class="button outlined" id="add-shape">Shape</button
+                ><button class="button outlined" id="add-icon">Icon</button
+                ><button class="button outlined" id="add-image">Image</button
+                ><input
+                  id="image-file"
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  hidden
+                /><button class="button outlined" id="add-shape">Shape</button
                 ><button class="button outlined" popovertarget="scene-settings">
                   Scene style</button
                 ><button class="button subtle" id="edit-canvas">
@@ -124,7 +175,22 @@
               popover="manual"
             >
               <div class="options-heading">
-                <strong id="selection-kind"></strong
+                <label
+                  >Font<select id="element-font">
+                    <option value="sans">Sans</option>
+                    <option value="serif">Serif</option>
+                    <option value="mono">Mono</option>
+                  </select></label
+                ><label id="image-fit-control" hidden
+                  >Image fit<select id="image-fit">
+                    <option value="cover">Cover / crop</option>
+                    <option value="contain">Contain</option>
+                  </select></label
+                ><label id="image-alt-control" hidden
+                  >Image description<input
+                    id="image-alt"
+                    maxlength="160" /></label
+                ><strong id="selection-kind"></strong
                 ><button
                   id="options-close"
                   class="button subtle"
@@ -133,7 +199,99 @@
                   Close
                 </button>
               </div>
-              <label id="shape-control" class="compact-control" hidden>Shape<select id="shape-kind"><option value="rect">Rectangle</option><option value="rounded">Rounded card</option><option value="ellipse">Ellipse / circle</option><option value="triangle">Triangle</option><option value="arrow">Arrow</option></select></label>
+              <fieldset class="element-animation">
+                <legend>Element animation</legend>
+                <label
+                  >Phase<select id="animation-phase">
+                    <option value="entrance">Entrance</option>
+                    <option value="exit">Exit</option>
+                  </select></label
+                ><label
+                  >Effect<select id="animation-effect">
+                    <option value="none">None</option>
+                    <option value="fade">Fade</option>
+                    <option value="slide">Slide</option>
+                    <option value="scale">Scale</option>
+                    <option value="characters">
+                      Character-by-character reveal
+                    </option>
+                    <option value="chart-draw">Draw chart / fill slices</option>
+                    <option value="words">Word-by-word reveal</option>
+                    <option value="wipe">Wipe / chart reveal</option>
+                  </select></label
+                ><label
+                  >Start · s<input
+                    id="animation-start"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value="0" /></label
+                ><label
+                  >Duration · s<input
+                    id="animation-duration"
+                    type="number"
+                    min="0.1"
+                    max="3"
+                    step="0.1"
+                    value="0.6" /></label
+                ><label
+                  >Direction<select id="animation-direction">
+                    <option value="left">From left</option>
+                    <option value="right">From right</option>
+                    <option value="up">From above</option>
+                    <option value="down">From below</option>
+                  </select></label
+                ><label
+                  >Easing<select id="animation-easing">
+                    <option value="linear">Linear</option>
+                    <option value="ease-out">Smooth settle</option>
+                    <option value="ease-in-out">Smooth start / stop</option>
+                    <option value="ease-out-quart">
+                      Quick arrival / long settle
+                    </option>
+                  </select></label
+                ><label
+                  >Intensity · 0–2<input
+                    id="animation-intensity"
+                    type="number"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    value="1" /></label
+                ><button id="animation-save" class="button">
+                  Apply motion
+                </button>
+              </fieldset>
+              <label id="icon-control" class="compact-control" hidden
+                >Icon<select id="icon-kind">
+                  <option value="check">Check</option>
+                  <option value="arrow">Arrow</option>
+                  <option value="star">Star</option>
+                  <option value="info">Info</option>
+                  <option value="target">Target</option>
+                  <option value="heart">Heart</option>
+                  <option value="book">Book</option>
+                  <option value="code">Code</option>
+                  <option value="shield">Shield</option>
+                  <option value="users">Users</option>
+                  <option value="cloud">Cloud</option>
+                  <option value="lightbulb">Lightbulb</option>
+                  <option value="calendar">Calendar</option>
+                  <option value="chart">Chart</option>
+                  <option value="mail">Mail</option>
+                  <option value="globe">Globe</option>
+                  <option value="layers">Layers</option>
+                  <option value="play">Play</option>
+                </select></label
+              ><label id="shape-control" class="compact-control" hidden
+                >Shape<select id="shape-kind">
+                  <option value="rect">Rectangle</option>
+                  <option value="rounded">Rounded card</option>
+                  <option value="ellipse">Ellipse / circle</option>
+                  <option value="triangle">Triangle</option>
+                  <option value="arrow">Arrow</option>
+                </select></label
+              >
               <button id="edit-element" class="button subtle">
                 Edit content</button
               ><label class="compact-control"
@@ -214,6 +372,14 @@
                   <option value="drift">Drift</option>
                   <option value="pulse">Pulse</option>
                 </select></label
+              ><label
+                >Next scene<select id="scene-transition">
+                  <option value="none">Cut / none</option>
+                  <option value="crossfade">Crossfade</option>
+                  <option value="slide-left">Slide left</option>
+                </select></label
+              ><button id="transition-preview" class="button subtle">
+                Preview transition</button
               ><button id="preview-motion" class="button subtle">
                 Preview motion</button
               ><label
@@ -262,6 +428,85 @@
                 Save changes
               </button>
             </section>
+            <div class="motion-transport" aria-label="Scene animation preview">
+              <select
+                id="scene-motion-preset"
+                aria-label="Scene animation preset"
+              >
+                <option value="none">Still scene</option>
+                <option value="reveal">Staggered reveal</option>
+                <option value="rise">Rise and settle</option>
+                <option value="focus">Focus in</option>
+                <option value="story">Text + chart reveals</option>
+                <option value="calm">Calm motion</option>
+                <option value="balanced">Balanced motion</option>
+                <option value="energetic">Energetic motion</option>
+                <option value="cinematic">Cinematic motion</option></select
+              ><button id="motion-preset-apply" class="button subtle">
+                Apply</button
+              ><button id="motion-play" class="button subtle">Play scene</button
+              ><label for="motion-time" class="sr-only">Scene time</label
+              ><input
+                id="motion-time"
+                type="range"
+                min="0"
+                max="4"
+                step="0.01"
+                value="0"
+              /><output id="motion-clock">0.0 s</output
+              ><button
+                id="timing-open"
+                class="button subtle"
+                popovertarget="timing-panel"
+              >
+                Timing</button
+              ><button id="motion-rest" class="button subtle">
+                Resting layout
+              </button>
+            </div>
+            <section
+              id="timing-panel"
+              popover
+              aria-label="Element timing"
+              class="scene-menu"
+            >
+              <div class="options-heading">
+                <strong>Scene timing</strong
+                ><button
+                  class="button subtle"
+                  popovertarget="timing-panel"
+                  popovertargetaction="hide"
+                >
+                  Close
+                </button>
+              </div>
+              <p class="field-hint">
+                Select a track to edit its timing. Use the scene slider to
+                inspect any frame.
+              </p>
+              <div id="timing-tracks"></div>
+            </section>
+            <div class="project-transport" aria-label="Full project playback">
+              <button id="project-play" class="button outlined">
+                Play project</button
+              ><button id="project-restart" class="button subtle">
+                Restart</button
+              ><button id="project-stop" class="button subtle">
+                Back to editing</button
+              ><select id="project-speed" aria-label="Preview speed">
+                <option value="1">1×</option>
+                <option value="0.5">0.5×</option>
+                <option value="2">2×</option></select
+              ><input
+                id="project-time"
+                type="range"
+                aria-label="Project time"
+                min="0"
+                max="60"
+                step="0.01"
+                value="0"
+              /><output id="project-clock">Full storyboard preview</output>
+            </div>
             <div class="preview-caption">
               <span id="preview-name">Scene 01 · Title</span
               ><span id="canvas-help"
@@ -275,13 +520,16 @@
               <div class="render-copy">
                 <h2 id="render-title">Ready when you are</h2>
                 <p>Silent video + editable presentation</p>
-                <p class="render-fine">Silent export · No API calls</p>
+                <p class="render-fine">
+                  Animated video · Static editable PowerPoint
+                </p>
               </div>
               <div class="export-controls">
                 <label for="output-format">Export format</label
                 ><select id="output-format" aria-label="Export format">
                   <option value="video">Video + PowerPoint</option>
                   <option value="pptx">PowerPoint only</option>
+                  <option value="video-only">Video only</option>
                 </select>
               </div>
               <button id="render" class="button primary">
@@ -321,13 +569,16 @@
           </button>
         </div>
         <p id="composer-intro">
-          Choose a structure, describe your story, then review the JSON before
-          replacing your project.
+          Start with a detailed example or describe your own story. Generate
+          editable slides, review the content, then apply them to your project.
         </p>
-        <label for="template">Story structure</label
+        <label for="template">Presentation goal</label
         ><select id="template">
           <option value="explainer">Clear explainer</option>
           <option value="pitch">Product pitch</option>
+          <option value="tutorial">Step-by-step tutorial</option>
+          <option value="comparison">Comparison / trade-offs</option>
+          <option value="caseStudy">Case study narrative</option>
           <option value="update">Project update</option>
         </select>
         <fieldset class="examples">
@@ -337,11 +588,11 @@
             class="button outlined"
             data-example="explainer"
           >
-            Explain a concept</button
+            Accessibility guide</button
           ><button type="button" class="button outlined" data-example="pitch">
-            Pitch a product</button
+            Team planning pitch</button
           ><button type="button" class="button outlined" data-example="update">
-            Share an update
+            Data-led update
           </button>
         </fieldset>
         <label for="brief-title">Project title</label
@@ -359,7 +610,7 @@
         ></textarea>
         <p id="brief-help" class="field-hint">
           Small local AI runs in this browser on your CPU. Initial loading
-          transfers about 386 MB from this computer and may take a while. No
+          transfers about 533 MB from this computer and may take a while. No
           brief is sent to an AI service. Review generated claims before using
           them.
         </p>
@@ -370,8 +621,87 @@
           maxlength="1080"
           aria-describedby="points-help"
         ></textarea>
+        <label for="brief-chart-data">Chart numbers (optional)</label
+        ><textarea
+          id="brief-chart-data"
+          rows="3"
+          maxlength="600"
+          placeholder="Week 1: 12&#10;Week 2: 18&#10;Week 3: 15"
+        ></textarea>
+        <p class="field-hint">
+          Want a graph? Enter 2–8 rows as label: number, for example Week 1: 12.
+          The AI uses these exact numbers. Leave blank for slides without
+          graphs.
+        </p>
         <p id="points-help" class="field-hint">
           One point per line, up to 6. Include facts the AI should preserve.
+        </p>
+        <section
+          id="ai-setup"
+          class="inline-content setup-panel"
+          aria-label="Local AI setup"
+        >
+          <h2>Local AI setup</h2>
+          <p>
+            <span id="setup-model"
+              >Qwen3.5 0.8B · Apache-2.0 · about 533 MB model download.</span
+            >
+            CPU inference needs additional browser memory. Only approved
+            model/runtime files are downloaded; your brief stays local.
+          </p>
+          <p id="setup-status" role="status">Checking installation…</p>
+          <button id="setup-start" class="button outlined">
+            Download and enable local AI</button
+          ><button id="setup-cancel" class="button subtle" hidden>
+            Cancel download
+          </button>
+        </section>
+        <label for="brief-style">Art direction</label
+        ><select id="brief-style">
+          <option value="studio">Studio · clean sans / blue ink</option>
+          <option value="editorial">Editorial · warm paper / serif</option>
+          <option value="technical">Technical · dark green / mono</option>
+          <option value="minimal">Minimal · ivory / quiet sans</option>
+          <option value="signal">Signal · plum / warm orange</option>
+          <option value="botanical">Botanical · sage / serif</option>
+          <option value="noir">Noir · charcoal / gold serif</option>
+          <option value="cobalt">Cobalt · blue / bold sans</option></select
+        ><label for="brief-motion-style">Motion character</label
+        ><select id="brief-motion-style">
+          <option value="calm">Calm · slow / subtle</option>
+          <option value="balanced" selected>
+            Balanced · smooth / moderate
+          </option>
+          <option value="energetic">Energetic · fast / bold</option>
+          <option value="cinematic">
+            Cinematic · deliberate reveals
+          </option></select
+        ><label for="brief-image">Your image (optional PNG / JPEG)</label
+        ><input id="brief-image" type="file" accept="image/png,image/jpeg" />
+        <p id="brief-image-status" class="field-hint">No supplied image.</p>
+        <button id="brief-image-clear" class="button subtle">
+          Remove image
+        </button>
+        <label for="brief-audience">Audience (optional)</label
+        ><input
+          id="brief-audience"
+          maxlength="100"
+          placeholder="General audience"
+        />
+        <label class="consent-label"
+          ><input
+            id="brief-motion"
+            type="checkbox"
+            checked
+            aria-describedby="brief-motion-help"
+          />
+          Animate the video</label
+        >
+        <p id="brief-motion-help" class="field-hint">
+          On: text, charts and shapes can fade, slide or scale in and out, with
+          transitions between slides. Off: slides stay still. You can change
+          each effect later in the editor. PowerPoint slides stay editable but
+          do not play these video animations.
         </p>
         <p id="composer-error" role="alert" tabindex="-1" hidden></p>
         <p id="composer-status" role="status" aria-live="polite"></p>

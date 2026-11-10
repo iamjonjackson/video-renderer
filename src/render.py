@@ -1,13 +1,14 @@
 """Declarative video spec renderer.
 
 Usage:
-    python3 render.py spec.json [-o output.mp4] [--workdir /tmp/renders] [--pptx-only]
+    python3 render.py spec.json [-o output.mp4] [--workdir /tmp/renders] [--pptx-only | --video-only]
 
 Scene durations are audio-driven when `narration` is present (duration = audio
 length + padding), unless an explicit `duration` overrides them.
 
 --pptx-only skips the video path and writes just the .pptx (narration,
 AI images and charts still generated, or reused from the workdir cache).
+--video-only writes the MP4 without collecting PowerPoint artifacts or exporting a deck.
 """
 
 import argparse
@@ -570,8 +571,12 @@ def render_pptx_only(spec: dict, output: str, workdir: Path):
 
 
 def render(
-    spec_path: str, output: str, workdir: str | None = None, render_video: bool = True
+    spec_path: str, output: str, workdir: str | None = None,
+    render_video: bool = True, export_pptx: bool = True
 ):
+    """Render video and/or PowerPoint; existing callers export both by default."""
+    if not render_video and not export_pptx:
+        raise ValueError("At least one export must be requested.")
     spec = load_spec(spec_path)
     theme = spec["theme"]
     voice_cfg = spec.get("voice", {})
@@ -580,6 +585,9 @@ def render(
     if (width, height) not in composition.RESOLUTIONS:
         raise ValueError("Unsupported resolution")
     theme["_resolution"] = (width, height)
+    has_transitions = any(isinstance(scene.get("transition"), dict) for scene in spec["timeline"])
+    if render_video and len(spec["timeline"]) > 12 and has_transitions:
+        raise ValueError("Authored scene transitions support at most 12 scenes; streaming would omit them.")
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
 
@@ -623,7 +631,8 @@ def render(
 
         dur = scene_duration(scene, audio_dur)
         clip = clip.with_duration(dur)
-        clip = apply_anim(clip, scene.get("anim", "fade"), dur)
+        if scene.get("motion_version") != 1:
+            clip = apply_anim(clip, scene.get("anim", "fade"), dur)
         # Animations like zoom-in resize frames over time even though the
         # clip's nominal size stays 1920x1080; composite onto the fixed canvas
         # so encoding always sees constant frame dimensions (variable-size
@@ -646,7 +655,8 @@ def render(
         else:
             video_clips.append(clip)
 
-        scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
+        if export_pptx:
+            scene_artifacts.append(collect_artifacts(scene, theme, workdir, audio_path))
 
         print(
             f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
@@ -710,10 +720,15 @@ def render(
             )
             Path(tmp).replace(output)
         print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps, streamed)")
-        _export_pptx(spec, scene_artifacts, output)
+        if export_pptx:
+            _export_pptx(spec, scene_artifacts, output)
         return
 
-    final = concatenate_videoclips(video_clips, method="compose")
+    final = (
+        composition.build_timeline(video_clips, spec["timeline"], width, height)
+        if has_transitions
+        else concatenate_videoclips(video_clips, method="compose")
+    )
     if audios:
         final = final.with_audio(CompositeAudioClip(audios))
     final.write_videofile(
@@ -721,7 +736,8 @@ def render(
     )
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
 
-    _export_pptx(spec, scene_artifacts, output)
+    if export_pptx:
+        _export_pptx(spec, scene_artifacts, output)
 
 
 if __name__ == "__main__":
@@ -729,11 +745,20 @@ if __name__ == "__main__":
     p.add_argument("spec")
     p.add_argument("-o", "--output", default="output/video.mp4")
     p.add_argument("--workdir", default=None)
-    p.add_argument(
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument(
         "--pptx-only",
         action="store_true",
         help="write only the .pptx (narration, images, charts); skip video encoding",
     )
+    mode.add_argument(
+        "--video-only",
+        action="store_true",
+        help="write only the .mp4; skip PowerPoint export and its artifacts",
+    )
     args = p.parse_args()
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    render(args.spec, args.output, args.workdir, render_video=not args.pptx_only)
+    render(
+        args.spec, args.output, args.workdir,
+        render_video=not args.pptx_only, export_pptx=not args.video_only,
+    )

@@ -143,7 +143,7 @@ function announce(message) {
 	$("editor-announcement").textContent = message;
 }
 function renderLabel() {
-	return $("output-format").value === "pptx"
+	return $("output-format").value === "video-only" ? "Render video" : $("output-format").value === "pptx"
 		? "Export PowerPoint"
 		: "Render project";
 }
@@ -154,9 +154,10 @@ function seconds() {
 	);
 }
 function save() {
+ if(typeof stopProjectPlayback==="function" && typeof projectFrame!=="undefined")stopProjectPlayback();
 	if (typeof refreshSceneThumbnails === "function") refreshSceneThumbnails();
 	try {
-		localStorage.setItem("frame-project-v1", JSON.stringify(project));
+		try{localStorage.setItem("frame-project-v1", JSON.stringify(project));}catch{notice("Browser storage is full. Export JSON now to preserve this project; the last saved copy was not replaced.");}
 	} catch {
 		notice("Browser storage is unavailable. Export JSON to keep your work.");
 	}
@@ -432,7 +433,9 @@ function checkImport(value) {
 		throw new Error(
 			"Import a JSON project with 1–12 scenes and text-based project settings.",
 		);
-	for (const scene of value.timeline) {
+	if(new TextEncoder().encode(JSON.stringify(value)).length>3*1024*1024)throw new Error("Project JSON exceeds 3 MiB.");
+ let assetBytes=0;
+ for (const scene of value.timeline) {
 		if (!object(scene)) throw new Error("Scenes must be objects.");
 		if (scene.type === "composition") {
 			if (
@@ -451,7 +454,7 @@ function checkImport(value) {
 			for (const item of scene.elements) {
 				if (
 					!object(item) ||
-					!["text", "chart", "shape"].includes(item.type) ||
+					!["text", "chart", "shape", "icon", "image"].includes(item.type) ||
 					typeof item.id !== "string" ||
 					typeof item.color !== "string" ||
 					!["x", "y", "w", "h"].every(
@@ -459,6 +462,8 @@ function checkImport(value) {
 					)
 				)
 					throw new Error("Invalid canvas geometry.");
+                if(item.type==="image"){if(typeof item.src!=="string"||!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(item.src)||item.src.length*3/4>256*1024+40||typeof item.alt!=="string"||item.alt.length>160||!["cover","contain",undefined].includes(item.fit))throw new Error("Use bounded embedded PNG/JPEG image assets with descriptions.");assetBytes+=item.src.length*3/4;if(assetBytes>2*1024*1024)throw new Error("Project images exceed 2 MiB.");}
+                if(item.font_family!==undefined&&!["sans","serif","mono"].includes(item.font_family))throw new Error("Unsupported font family.");
 				if (
 					item.type === "text" &&
 					(typeof item.text !== "string" ||
@@ -526,8 +531,8 @@ $("file").onchange = async () => {
 	try {
 		const file = $("file").files[0];
 		if (!file) return;
-		if (file.size > 128 * 1024)
-			throw new Error("JSON files must be smaller than 128 KB.");
+		if (file.size > 3 * 1024 * 1024)
+			throw new Error("JSON files must be smaller than 3 MiB.");
 		const value = JSON.parse(await file.text());
 		checkImport(value);
 		const { spec } = await request("/api/validate", {
@@ -627,18 +632,10 @@ $("render").onclick = async () => {
 		notice(error.message);
 	}
 };
-try {
-	const saved = localStorage.getItem("frame-project-v1");
-	if (saved) {
-		checkImport(JSON.parse(saved));
-		project = JSON.parse(saved);
-		$("project-title").value = project.meta?.title || "Untitled project";
-	}
-} catch {
-	notice(
-		"Your saved project could not be restored. Import an exported JSON file to recover it.",
-	);
-}
+let savedToRestore=null;
+const initialProjectState=JSON.stringify(project);
+try{const saved=localStorage.getItem('frame-project-v1');if(saved){checkImport(JSON.parse(saved));savedToRestore=JSON.parse(saved);}}
+catch{notice('Saved project is invalid. Import a verified JSON copy to recover it.');}
 
 fetch("/api/bootstrap")
 	.then((response) => {
@@ -650,7 +647,8 @@ fetch("/api/bootstrap")
 
 		return data;
 	})
-	.then(({ job }) => {
+	.then(async ({ job }) => {
+        if(savedToRestore){try{const {spec}=await request("/api/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(savedToRestore)});if(JSON.stringify(project)===initialProjectState)importProject(spec);}catch(error){notice("Saved project was not restored: "+error.message);}}
 		if (job?.state === "rendering") {
 			rendering = true;
 			$("render").disabled = true;

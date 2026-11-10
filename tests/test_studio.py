@@ -114,6 +114,36 @@ class ApiTests(unittest.TestCase):
         connection.close()
         return response.status, body
 
+    def test_ai_setup_endpoints_are_protected_and_manifest_only(self):
+        headers = {
+            "X-Studio-Token": self.server.token,
+            "Content-Type": "application/json",
+        }
+        self.assertEqual(self.request("/api/ai-setup")[0], 403)
+        self.assertEqual(self.request("/api/ai-setup", headers=headers)[0], 200)
+        with patch.object(self.server.ai_setup, "start") as start:
+            for payload in (
+                {"consent": False},
+                {"consent": 1},
+                {"consent": True, "url": "https://example.com/model"},
+            ):
+                self.assertEqual(
+                    self.request("/api/ai-setup/start", "POST", payload, headers)[0],
+                    400,
+                )
+            start.assert_not_called()
+            self.assertEqual(
+                self.request("/api/ai-setup/start", "POST", {"consent": True}, headers)[
+                    0
+                ],
+                202,
+            )
+            start.assert_called_once_with(consent=True)
+        self.assertEqual(
+            self.request("/api/ai-setup/cancel", "POST", {"path": "/tmp"}, headers)[0],
+            400,
+        )
+
     def test_host_origin_and_token_gates(self):
         self.assertEqual(self.request("/", headers={"Host": "evil.example"})[0], 403)
         self.assertEqual(
@@ -229,6 +259,104 @@ class ApiTests(unittest.TestCase):
             self.assertIn("--pptx-only", launch.call_args.args[0])
         self.assertEqual(self.jobs.snapshot()["artifacts"], ["pptx"])
         self.assertFalse((directory / "video.mp4").exists())
+
+    def test_malformed_next_scene_returns_validation_error(self):
+        headers = {
+            "Content-Type": "application/json",
+            "X-Studio-Token": self.server.token,
+        }
+        first = {
+            "type": "composition",
+            "duration": 4,
+            "motion_version": 1,
+            "transition": {"effect": "crossfade", "duration": 0.5},
+            "elements": [],
+        }
+        for next_scene in (
+            {"type": "title", "text": "Next", "duration": "bad"},
+            "invalid",
+        ):
+            status, body = self.request(
+                "/api/validate", "POST", {"timeline": [first, next_scene]}, headers
+            )
+            self.assertEqual(status, 400)
+            self.assertIn("error", json.loads(body))
+
+    def test_video_only_api_wires_renderer_and_never_offers_stray_deck(self):
+        finished = threading.Event()
+        render_job = self.jobs._render
+        commands = []
+
+        def complete(*args):
+            try:
+                render_job(*args)
+            finally:
+                finished.set()
+
+        def launch(command, **kwargs):
+            commands.append(command)
+            directory = Path(kwargs["cwd"])
+            (directory / "video.mp4").write_bytes(b"video-fixture")
+            with zipfile.ZipFile(directory / "video.pptx", "w") as archive:
+                archive.writestr("ppt/presentation.xml", "<presentation/>")
+
+            class Process:
+                def wait(self, timeout=None):
+                    return 0
+
+            return Process()
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-Studio-Token": self.server.token,
+        }
+        with (
+            patch.object(self.jobs, "_render", side_effect=complete),
+            patch("src.studio.subprocess.Popen", side_effect=launch),
+        ):
+            status, _ = self.request(
+                "/api/render", "POST", {"spec": BASE, "format": "video-only"}, headers
+            )
+            self.assertEqual(status, 202)
+            self.assertTrue(finished.wait(5), "Render thread did not finish")
+        self.assertIn("--video-only", commands[0])
+        self.assertNotIn("--pptx-only", commands[0])
+        status, body = self.request("/api/job", headers=headers)
+        self.assertEqual(status, 200)
+        snapshot = json.loads(body)["job"]
+        self.assertEqual(snapshot["state"], "complete")
+        self.assertEqual(snapshot["artifacts"], ["mp4"])
+        self.assertEqual(
+            snapshot["message"], "Video is ready. No PowerPoint was requested."
+        )
+        self.assertEqual(
+            self.request(f"/api/artifact/{snapshot['id']}/mp4", headers=headers)[0], 200
+        )
+        self.assertEqual(
+            self.request(f"/api/artifact/{snapshot['id']}/pptx", headers=headers)[0],
+            404,
+        )
+
+    def test_video_only_requires_usable_mp4(self):
+        directory = Path(self.jobs.storage.name) / "missing-video"
+        directory.mkdir()
+
+        class Process:
+            def wait(self, timeout=None):
+                return 0
+
+        with patch("src.studio.subprocess.Popen", return_value=Process()):
+            self.jobs._render("a" * 32, directory, "video-only")
+        self.assertEqual(self.jobs.snapshot()["state"], "failed")
+        self.assertEqual(self.jobs.snapshot()["artifacts"], [])
+        self.assertIn("usable video", self.jobs.snapshot()["message"])
+
+    def test_offline_font_allowlist(self):
+        for family in ("sans", "serif", "mono"):
+            status, body = self.request(f"/fonts/{family}-regular.ttf")
+            self.assertEqual(status, 200)
+            self.assertEqual(body[:4], b"\x00\x01\x00\x00")
+        self.assertEqual(self.request("/fonts/../../README.md")[0], 404)
 
     def test_traversal_cannot_read_files(self):
         for path in ("/../README.md", "/api/artifact/../../README.md", "/.env"):

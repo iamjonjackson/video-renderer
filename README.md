@@ -55,7 +55,7 @@ production server or a hosted collaboration service.
 - **Editor / Create** navigation switches between the canvas and a dedicated
   storyboard-generation page without overlays. Browser Back/Forward work;
   navigation preserves the current project. Create offers explainer,
-  product-pitch and project-update prompt examples. A small 360M-parameter AI
+  product-pitch and project-update prompt examples. A small 0.8B-parameter AI
   runs on the browser CPU to write
   validated JSON from your title, description (20–3000 characters) and optional
   key points. Review the JSON, then explicitly
@@ -116,7 +116,7 @@ production server or a hosted collaboration service.
 - The canvas is an **approximate layout preview**, not a live MoviePy render.
   Long text may clip in the final video; inspect the rendered result. Line/pie
   charts are represented by a labelled data preview, not an exact chart.
-- Choose **Video + PowerPoint** or **PowerPoint only**. The latter reuses the
+- Choose **Video + PowerPoint**, **Video only** or **PowerPoint only**. Video only skips PowerPoint preparation and export entirely. The latter reuses the
   CLI's `--pptx-only` path: no MP4 generation or encoding. Download links are
   offered only for successful output types.
 - Render an actual **silent MP4 and PPTX** with download links. Narration stays
@@ -153,23 +153,19 @@ The existing CLI and AI integrations remain available.
 
 ### Browser-local AI storyboard drafting
 
-Before first use, download the pinned model and browser runtime:
+On first use, open **Create** and select **Download and enable local AI**.
+The setup panel shows progress and cancellation. Studio downloads only fixed,
+checksum-pinned model/runtime assets after consent, verifies them, and activates
+all assets together. No separate shell setup is required. Installed assets are
+verified offline on server startup and reused. Cancelled/failed setups keep partial
+files out of use; retry is explicit. Setup needs internet and about 543 MB installed disk
+space, plus staging space and browser memory. Prompts are never part of download
+requests. Assets remain ignored by Git. `python scripts/setup_browser_ai.py` is an
+optional CLI for the same provisioning mechanism.
 
-```bash
-python scripts/setup_browser_ai.py
-python src/studio.py
-```
-
-Setup needs internet access and roughly 400 MB of disk space. It verifies SHA-256
-model and SHA-512 package checksums without executing package installation scripts.
-Assets stay in `studio/ai-assets/` (ignored by Git); rerun setup after a fresh clone.
-Generation then works without internet. No API key, Ollama, GPU or AI server is
-required. This is the only generation method; the former hardcoded local templates,
-Mistral endpoint and `--enable-generation` option have been removed.
-
-Uses [SmolLM2-360M-Instruct](https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct)
-(Apache-2.0; see `studio/SMOLLM2-LICENSE`), Q8_0 weights pinned to Unsloth revision
-`391ed11137586e383b1be0fab9acf01d282c2e11`, and
+Uses [Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B)
+(Apache-2.0; see `studio/QWEN-LICENSE`), Q4_K_M weights pinned to Unsloth revision
+`6ab461498e2023f6e3c1baea90a8f0fe38ab64d0`, and
 [wllama 3.13.0](https://github.com/ngxson/wllama) (MIT). wllama runs single-threaded
 WebAssembly CPU inference in a worker; JSON-schema grammar constrains the output.
 The model, WASM and JavaScript load only from Studio's same-origin static server.
@@ -177,25 +173,39 @@ The brief is not sent to a hosted AI service. Generated JSON goes to the local
 Python `/api/validate` endpoint before review; that endpoint makes no AI calls.
 
 In **Create**, fill a title, description and optional key points, then select
-**Generate storyboard JSON**. Initial loading transfers about 386 MB from the
+**Generate storyboard JSON**. Initial loading transfers about 533 MB from the
 local server into browser storage. Loading progress and **Cancel generation**
 are available; editing the brief or leaving Create cancels pending work. Your
 project is unchanged until you review the JSON and confirm replacement.
 
 A current browser with WebAssembly, worker and browser-storage support is needed.
 Runtime memory exceeds model size; low-memory devices may fail, and weaker CPUs
-can be slow. This is not a guarantee of support on every machine. The generator now explains the input roles and silent-video requirements, assigns
-source key points to ordered slides, and constrains the opening/body/ending schema.
-It creates 4–8 slides within the 60-second limit, rather than allowing a three-slide
-placeholder. No-key-point briefs are divided using their source sentences. Slide
-headings retain assigned source topics when they fit the heading limit; otherwise
-  the model writes a concise heading. The AI writes the visible body text.
-This is structure enforcement, not a hardcoded content generator.
+can be slow. This is not a guarantee of support on every machine. The generator writes directly to editable composition JSON with stable element IDs,
+source-preserving text, safe normalised layout and aspect-aware typography. Supporting
+sentences and takeaways are chosen from the brief rather than invented. This is a
+source-grounded assembly mode, not unrestricted creative writing: use short source
+sentences (up to 180 characters), review selected sentence relevance and text fit.
+Generated canvases have 3–8 scenes. Every required point remains visible. Optional
+entrance motion uses the same versioned contract as the editor and video renderer.
 
-The tiny model
-is intentionally less capable than larger models: use clear, concise English
-briefs, verify facts and rewrite weak drafts. Invalid/truncated output is rejected,
-not repaired or replaced by a template. No automatic retry or cloud fallback.
+### Element animation
+
+Select an element and open its options to set **Fade**, **Slide** or **Scale**,
+start time and duration. Slide direction is editable. **Play scene** previews the
+scene; its slider deterministically scrubs time; **Resting layout** restores the
+editable base pose. Reduced-motion preferences disable playback but permit frame
+inspection. Changing scenes or editing cancels playback. Motion is saved in JSON as
+`motion_version: 1` and element `animation` metadata; legacy projects remain static.
+
+Start/duration are scene-local seconds, duration 0.1–3 seconds, and entrances must
+finish within the scene. Effects are finite, not generated scripts. Video renders
+the authored motion; PowerPoint exports editable static resting layouts and notes
+explicitly explaining that video animation is not reproduced. Entrance and exit effects apply to text, charts and shapes. Exit tracks must
+start after entrance tracks finish. Scene style offers Crossfade and Slide Left
+transitions into the following scene, with preview. Video keeps the total timeline
+duration unchanged: a transition occupies the beginning of the next scene.
+Native PowerPoint animation, loop effects, undo/redo and a full multitrack timeline
+are not yet implemented. Unsupported timing/effects are rejected rather than silently omitted.
 
 Run the Studio checks:
 
@@ -308,3 +318,181 @@ Work happens on a branch in your fork **first**; the PR comes last.
 5. **Push your branch and open a PR** (`gh pr create`, or the web UI's Contribute button), referencing the issue (`Closes #N`) and attaching screenshot/video evidence as per the PR template
 
 > CI runs on PRs but without access to repo secrets — test locally or in your fork with your own `MISTRAL_API_KEY` if your change touches TTS or image generation.
+
+### Representative local-AI briefs
+
+`samples/canvas-ai-briefs.json` contains detailed explainers, a qualified product
+pitch, a completed/planned project update, verified numeric data, sparse input and
+an adversarial override example. Paste each title/description/key-point set into
+Create and select its audience/aspect/motion options. Review source coverage,
+sentence relevance, duplication, readability, timing and factual qualifiers before
+applying; schema-valid JSON alone is not a quality pass.
+
+Generation infers compact editorial/style choices, not repetitive coordinate JSON.
+A validated layout assembler preserves source text and builds canvas geometry and
+motion. This remains a constrained source-selection workflow, not free-form design.
+Charts, diagrams, shapes and numeric data editing are editor capabilities; these
+briefs do not imply that AI automatically creates charts or a full visual design.
+Sparse input can still repeat content. Detected override/invented-data instructions
+are rejected; this is a narrow guard, not a general semantic-injection guarantee.
+
+The default uses Qwen3.5-0.8B Q4_K_M with thinking disabled and a bounded 4K
+context. No vision projector or vision assets are downloaded. Upgrades reuse
+checksum-verified runtime files; runtime repairs reuse verified model weights.
+Activation replaces the installation atomically and retires old model files only
+after the new installation verifies. No silent downgrade or cloud fallback.
+
+Model selection compared SmolLM2-360M, Qwen2.5-0.5B, Qwen3-0.6B, Qwen3.5-0.8B
+and LiquidAI LFM2.5-350M. Qwen3.5 scored 6/7 on a bounded source-selection test in
+both native CPU and browser WASM runs; Qwen2.5 scored 4/7 native and 2/7 browser.
+Q3_K_M saved about 62 MB but scored 5/7 native, so Q4_K_M remains the supported
+path. These are small task-specific observations on one Mac, not universal model
+quality or device performance guarantees.
+
+### Visual AI composition
+
+Create accepts optional verified chart rows (`label: value`, 2–8 rows). AI can select
+column, horizontal, line, area, pie or doughnut designs using only those supplied
+values. A brief asking for a graph/chart with verified data requires one chart on
+an eligible body scene; charts are not duplicated across every slide. Numbers in
+prose are not inferred into data. Negative data cannot select pie/doughnut.
+
+The model also chooses text, accent, rounded-card or arrow treatments and solid,
+gradient or grid backgrounds from reviewed layout primitives. It does not generate
+arbitrary drawing code. All visuals are editable, use the same motion contract and
+are validated before applying. Review visual appropriateness and readability.
+
+### Design and coordinated motion
+
+Frame uses original bounded design primitives inspired by public animation
+patterns: exact-time seeking (HyperFrames) and staggered transform-based reveals
+(Motion). It does not embed either product's agent, copy paid assets, execute
+model-authored scripts or introduce another renderer.
+
+AI can choose editorial, spotlight or split layouts; violet, teal or amber palettes;
+reviewed icons; background treatments; and coordinated reveal/rise/focus presets.
+Portrait generation avoids split layouts. Charts retain supplied values. Review
+text fit and visual relevance—the small model is not a general design agent.
+
+The Icon tool adds editable check, arrow, star, info, target or heart elements.
+Geometry is shared between SVG preview, Pillow video frames and editable native
+PowerPoint paths. Scene animation presets coordinate entrances/exits without
+changing resting positions. Select an element to customise its motion afterwards.
+Bitmap image upload/generation, per-word text animation and per-series chart growth
+are not implemented. Generating images requires a separately reviewed model/runtime;
+no hosted image service is used implicitly.
+
+### Word and chart reveals
+
+Text can reveal word by word while reserving its complete final layout; seeking
+backwards does not rewrite its content. Wipe entrances reveal text, charts, shapes
+or icons from left to right without replacing their resting geometry. A chart wipe
+reveals the entire graphic (including labels), not interpolated invented values.
+Both effects are entrance-only; existing fade/slide/scale exits remain available.
+
+Use **Text + chart reveals** to apply coordinated words/wipes to a scene. The
+**Timing** panel lists entrance/exit tracks with time bars; selecting a track opens
+its timing controls. Preview and video use the same eased progress and threshold
+rules. Editing restores the complete resting pose. PowerPoint remains static and
+editable. Browser/Pillow font wrapping may differ, so inspect actual exports.
+
+### Full storyboard preview
+
+**Play project** runs every scene automatically on one master clock, with element
+entrances/exits and scene transitions. Pause/resume, Restart, 0.5×/1×/2× speed and
+the project scrubber inspect the whole sequence without changing the editing scene.
+**Back to editing** removes the preview; edits invalidate it. Reduced motion blocks
+autoplay but permits seeking. Background motion is an approximate browser treatment,
+not pixel-identical to Pillow's video background implementation; inspect export.
+The selection/application stages of AI visuals share one allowed-design contract,
+including later scenes after the one permitted chart has already been inserted.
+
+### Content-specific animation
+
+**Draw chart / fill slices** draws a line/area through successive data points with
+point-marker arrivals, grows bars from zero, or reveals pie/doughnut wedges through
+their supplied shares. Percentages appear when each slice finishes; no values are
+invented or rewritten. **Character-by-character reveal** retains the final text
+layout and reveals Unicode codepoints, including whitespace, at deterministic times.
+It is not grapheme-cluster-aware; complex combined scripts need export inspection.
+The story preset now uses characters for text and chart-draw for charts. Both are
+entrance-only. Editing/resting mode restores complete content; PPTX stays static.
+
+### Art direction, fonts and supplied images
+
+Create offers three coherent directions: **Studio** (blue ink / sans),
+**Editorial** (warm paper / serif), and **Technical** (dark green / mono).
+The local model chooses source sentences and hero, poster, split or framed layouts;
+host code owns geometry, palette and numeric data. Prompts include scene role,
+audience, prior layout and factual constraints. Browser font measurements reject
+text that cannot fit at the minimum size rather than silently clipping it.
+
+Add a PNG/JPEG in Create to support opening/body compositions, or use **Image** in
+the editor. Assets are embedded in project JSON, not fetched from URLs. Cover crops
+centrally; Contain preserves the entire image. Edit fit/description in element
+options. Images stay separate movable pictures in PowerPoint, not editable pixels.
+No image-generation model or stock-photo service is invoked.
+
+Uploads are resampled locally to ≤1600 pixels and must fit 256 KiB encoded raster
+bytes per asset. Server validation permits ≤2048 pixels/side, ≤4 million pixels,
+2 MiB aggregate image bytes and 3 MiB request/JSON size. SVG, remote paths, animated,
+corrupt and MIME-mismatched files are rejected. Storage quota failures advise JSON
+export without replacing the last saved copy.
+
+Font choices are offline DejaVu Sans, Serif and Sans Mono, regular/bold, served from
+the existing matplotlib installation. Licence: `studio/DEJAVU-LICENSE`. Pillow and
+browser use those same families. PowerPoint references the matching font names;
+recipients need them installed or their presentation app may substitute fonts.
+Complex script shaping and browser/Pillow wrapping are not pixel-identical.
+
+### Variety and motion character
+
+Art directions now include **Minimal, Signal, Botanical, Noir and Cobalt** alongside
+Studio, Editorial and Technical. Caption and heading-band layouts extend the layout
+kit. Tutorial, comparison and case-study goals provide additional editorial intents;
+they preserve the supplied source order rather than inventing new steps/results.
+These are original compositions informed by public design-system/editorial patterns,
+not downloaded OpenDesign plugins, copied brand assets or an external agent runtime.
+
+The original offline vector library now has 18 symbols, including book, code, shield,
+users, cloud, lightbulb, calendar, chart, mail, globe, layers and play. Local generation
+selects a relevant symbol or none; both video and editable PPTX use the same primitive
+geometry in `studio/vector-library.json` for the new symbols. No SVG import, external
+icon CDN or diffusion-image model is required. Icons illustrate concepts, not photos.
+
+Choose Calm, Balanced, Energetic or Cinematic in Create or scene motion presets.
+Styles coordinate duration, stagger, element-specific effects, easing and transform
+intensity. Individual tracks expose four easing curves and intensity 0–2. Intensity
+changes only slide travel/scale amplitude; it does not change text content, chart
+values or resting geometry. Reveal timing still follows easing. Short scenes clamp
+tracks to preserve non-overlapping entrance/exit timing. Reduced motion still blocks
+autoplay. These are bounded deterministic curves, not a spring-physics simulation.
+
+Automatic raster generation needs a separately reviewed model/runtime or API with
+explicit download/privacy/cost consent. A small output image does not make the model
+small: for example FLUX.1-schnell is a 12-billion-parameter model. Current generation
+creates vector-led layouts automatically; it does not claim to generate photography.
+
+### Directed sequences (not only animated slides)
+
+Local generation now has a second constrained directing pass **after composition**.
+It sees the actual visual targets and chooses a build, spotlight, visual-first or
+text-first shot. The compiler creates a timed focal beat, supporting reveal and
+reading hold. A visual-first shot is offered only when a chart/image/symbol exists.
+This separates editorial layout from temporal storytelling instead of asking the
+small model for unrestricted HTML or executable animation code.
+
+Portable `keyframes` on elements describe ordered `{time,x,y,scale,opacity}` poses.
+`x/y` are canvas-normalised offsets from resting geometry, not absolute positions.
+Tracks contain 2–8 strictly increasing finite times inside the scene, offset bounds
+−1…1, scale .5…1.5 and opacity 0…1. Cosine interpolation is deterministic under seek;
+offsets add to entrance/exit transforms and opacity/scale multiply. Static PPTX
+remains the complete resting composition. Timing lists directed poses and lets you
+remove them. Applying a scene preset replaces directed poses as well as entrances.
+
+The HyperFrames examples gallery informed the separation of compositions and timed
+blocks (kinetic type, callouts, chart stories), but only its public text catalogue
+was inspected—not full video playback. Frame does not reproduce its HTML/GSAP/3D
+capabilities. There is still no remote storyboard API provider; local generation and
+validated imported JSON use the same portable render contract. Credentials currently
+serve the separate existing TTS/image CLI paths, not a newly activated paid generator.

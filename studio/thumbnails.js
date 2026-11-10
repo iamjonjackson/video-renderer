@@ -21,11 +21,12 @@ function renderSceneThumbnail(frame, scene) {
 			node.textContent = item.text;
 			node.style.fontSize = `${item.font_size * 100}cqh`;
 			node.style.fontWeight = item.bold ? "700" : "400";
+ node.style.fontFamily=`"${canvasFontNames[item.font_family||"sans"]}"`;node.style.whiteSpace="pre-wrap";
 			node.style.textAlign = item.align || "left";
-		} else if (item.type === "shape") {
+		} else if(item.type==="image"){drawCanvasImage(node,item);} else if (item.type === "shape") {
 			node.style.background = item.color;
 			styleShape(node,item);
-		} else drawChart(node, item);
+		} else if(item.type==="icon"){node.append(canvasIcon(item.icon));node.classList.add("canvas-icon");}else drawChart(node, item);
 		frame.append(node);
 	}
 }

@@ -227,10 +227,10 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                     height=prs.slide_height,
                 )
             composition.export_slide(slide, scene, prs.slide_width, prs.slide_height)
-            if scene.get("narration"):
+            if scene.get("narration") or any((item.get("animation") or item.get("keyframes")) for item in scene["elements"]):
                 notes = slide.notes_slide.notes_text_frame
                 if notes is not None:
-                    notes.text = scene["narration"]
+                    notes.text = scene.get("narration", "") + ("\nVideo entrance animations are not reproduced in this static editable PowerPoint slide." if any((item.get("animation") or item.get("keyframes")) for item in scene["elements"]) else "")
             if art.get("narration_path"):
                 media = slide.shapes.add_movie(
                     art["narration_path"],

@@ -121,14 +121,38 @@
       ],
       "properties": {
         "transition": {
-          "type": "string",
-          "enum": [
-            "none",
-            "fade",
-            "slide-left",
-            "wipe"
-          ],
-          "description": "Transition into the next scene"
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "fade",
+                "slide-left",
+                "wipe"
+              ]
+            },
+            {
+              "type": "object",
+              "required": [
+                "effect",
+                "duration"
+              ],
+              "properties": {
+                "effect": {
+                  "enum": [
+                    "crossfade",
+                    "slide-left"
+                  ]
+                },
+                "duration": {
+                  "type": "number",
+                  "minimum": 0.1,
+                  "maximum": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       }
     },
@@ -259,17 +283,56 @@
     },
     "chart": {
       "properties": {
-        "type": { "const": "chart" },
-        "chart_type": { "enum": ["bar", "line", "pie"], "default": "bar" },
-        "heading": { "type": "string" },
-        "labels": { "type": "array", "items": { "type": "string" } },
-        "values": { "type": "array", "items": { "type": "number" } },
-        "y_label": { "type": "string" },
-        "pptx_chart": { "enum": ["native", "image"], "default": "native", "description": "PPTX export only: editable PowerPoint chart, or the matplotlib PNG used in the video" },
-        "narration": { "type": "string" },
-        "duration": { "type": "number" },
-        "padding": { "type": "number", "default": 1.0 },
-        "transition": { "type": "string" }
+        "type": {
+          "const": "chart"
+        },
+        "chart_type": {
+          "enum": [
+            "bar",
+            "line",
+            "pie"
+          ],
+          "default": "bar"
+        },
+        "heading": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "y_label": {
+          "type": "string"
+        },
+        "pptx_chart": {
+          "enum": [
+            "native",
+            "image"
+          ],
+          "default": "native",
+          "description": "PPTX export only: editable PowerPoint chart, or the matplotlib PNG used in the video"
+        },
+        "narration": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "number"
+        },
+        "padding": {
+          "type": "number",
+          "default": 1.0
+        },
+        "transition": {
+          "type": "string"
+        }
       },
       "required": [
         "type",
@@ -380,7 +443,9 @@
                 "enum": [
                   "text",
                   "chart",
-                  "shape"
+                  "shape",
+                  "icon",
+                  "image"
                 ]
               },
               "x": {
@@ -434,6 +499,28 @@
                   "arrow"
                 ]
               },
+              "icon": {
+                "enum": [
+                  "check",
+                  "arrow",
+                  "star",
+                  "info",
+                  "target",
+                  "heart",
+                  "book",
+                  "code",
+                  "shield",
+                  "users",
+                  "cloud",
+                  "lightbulb",
+                  "calendar",
+                  "chart",
+                  "mail",
+                  "globe",
+                  "layers",
+                  "play"
+                ]
+              },
               "chart_type": {
                 "enum": [
                   "bar",
@@ -455,10 +542,217 @@
                 "items": {
                   "type": "number"
                 }
+              },
+              "animation": {
+                "type": "object",
+                "required": [
+                  "effect",
+                  "start",
+                  "duration",
+                  "easing"
+                ],
+                "properties": {
+                  "effect": {
+                    "enum": [
+                      "fade",
+                      "slide",
+                      "scale",
+                      "words",
+                      "wipe",
+                      "characters",
+                      "chart-draw"
+                    ]
+                  },
+                  "start": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "duration": {
+                    "type": "number",
+                    "minimum": 0.1,
+                    "maximum": 3
+                  },
+                  "easing": {
+                    "enum": [
+                      "linear",
+                      "ease-out",
+                      "ease-in-out",
+                      "ease-out-quart"
+                    ]
+                  },
+                  "direction": {
+                    "enum": [
+                      "left",
+                      "right",
+                      "up",
+                      "down"
+                    ]
+                  },
+                  "intensity": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2
+                  }
+                },
+                "additionalProperties": false
+              },
+              "exit_animation": {
+                "type": "object",
+                "required": [
+                  "effect",
+                  "start",
+                  "duration",
+                  "easing"
+                ],
+                "properties": {
+                  "effect": {
+                    "enum": [
+                      "fade",
+                      "slide",
+                      "scale"
+                    ]
+                  },
+                  "start": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "duration": {
+                    "type": "number",
+                    "minimum": 0.1,
+                    "maximum": 3
+                  },
+                  "easing": {
+                    "enum": [
+                      "linear",
+                      "ease-out",
+                      "ease-in-out",
+                      "ease-out-quart"
+                    ]
+                  },
+                  "direction": {
+                    "enum": [
+                      "left",
+                      "right",
+                      "up",
+                      "down"
+                    ]
+                  },
+                  "intensity": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2
+                  }
+                },
+                "additionalProperties": false
+              },
+              "font_family": {
+                "enum": [
+                  "sans",
+                  "serif",
+                  "mono"
+                ]
+              },
+              "src": {
+                "type": "string",
+                "maxLength": 349550,
+                "pattern": "^data:image/(png|jpeg);base64,"
+              },
+              "alt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "fit": {
+                "enum": [
+                  "cover",
+                  "contain"
+                ]
+              },
+              "keyframes": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "time",
+                    "x",
+                    "y",
+                    "scale",
+                    "opacity"
+                  ],
+                  "properties": {
+                    "time": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "x": {
+                      "type": "number",
+                      "minimum": -1,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": -1,
+                      "maximum": 1
+                    },
+                    "scale": {
+                      "type": "number",
+                      "minimum": 0.5,
+                      "maximum": 1.5
+                    },
+                    "opacity": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                }
               }
             },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "icon"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "icon"
+                  ]
+                }
+              }
+            ],
             "additionalProperties": false
           }
+        },
+        "motion_version": {
+          "const": 1
+        },
+        "transition": {
+          "type": "object",
+          "required": [
+            "effect",
+            "duration"
+          ],
+          "properties": {
+            "effect": {
+              "enum": [
+                "crossfade",
+                "slide-left"
+              ]
+            },
+            "duration": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -21,7 +21,7 @@ from typing import cast
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "studio"
-MAX_BODY = 128 * 1024
+MAX_BODY = 3 * 1024 * 1024
 MAX_ARTIFACT = 100 * 1024 * 1024
 
 
@@ -92,6 +92,11 @@ def validate_spec(value):
     scenes = spec.get("timeline")
     if not isinstance(scenes, list) or not 1 <= len(scenes) <= 12:
         raise SpecError("Timeline: include between 1 and 12 scenes.")
+    for index, scene in enumerate(scenes, 1):
+        if not isinstance(scene, dict):
+            raise SpecError(f"Scene {index}: expected an object.")
+        scene.setdefault("duration", 4)
+        number(scene["duration"], f"Scene {index} duration", 1, 15)
     duration = 0
     common = ("type", "duration", "anim", "narration", "padding")
     fields = {
@@ -99,7 +104,13 @@ def validate_spec(value):
         "outro": ("text",),
         "bullets": ("heading", "items", "stagger", "narration_per_bullet"),
         "chart": ("heading", "chart_type", "labels", "values", "y_label", "pptx_chart"),
-        "composition": ("name", "elements", "background"),
+        "composition": (
+            "name",
+            "elements",
+            "background",
+            "motion_version",
+            "transition",
+        ),
     }
     for index, scene in enumerate(scenes, 1):
         where = f"Scene {index}"
@@ -120,11 +131,30 @@ def validate_spec(value):
         object_fields(scene, common + fields[kind], where)
         for key in ("text", "subtitle", "heading", "y_label", "narration"):
             if key in scene:
-                text(scene[key], f"{where} {key}", (7205 if kind == "composition" else 1200) if key == "narration" else 300)
+                text(
+                    scene[key],
+                    f"{where} {key}",
+                    (7205 if kind == "composition" else 1200)
+                    if key == "narration"
+                    else 300,
+                )
                 if key != "narration":
                     composition.check_glyphs(scene[key], f"{where} {key}")
         if kind in ("title", "outro") and not scene.get("text", "").strip():
             raise SpecError(f"{where}: add some text.")
+        if "transition" in scene and kind == "composition":
+            transition = scene["transition"]
+            object_fields(transition, ("effect", "duration"), "Scene transition")
+            if scene.get("motion_version") != 1 or transition.get("effect") not in (
+                "crossfade",
+                "slide-left",
+            ):
+                raise SpecError("Choose a supported v1 scene transition.")
+            number(transition.get("duration"), "Transition duration", 0.1, 1)
+            if index == len(scenes):
+                raise SpecError("The final scene cannot transition to a missing scene.")
+            if scene["transition"]["duration"] > scenes[index].get("duration", 4):
+                raise SpecError("Transition must fit the following scene.")
         if scene.get("anim", "fade") not in ("fade", "slide-up", "zoom-in"):
             raise SpecError(f"{where}: unsupported animation.")
         if "padding" in scene:
@@ -179,6 +209,21 @@ def validate_spec(value):
         duration += scene["duration"]
     if duration > 60:
         raise SpecError("Timeline: keep the total duration at 60 seconds or less.")
+    if __package__:
+        from .canvas_assets import image_bytes
+    else:
+        from canvas_assets import image_bytes
+
+    total_assets = sum(
+        len(image_bytes(item["src"]))
+        for scene in spec["timeline"]
+        for item in scene.get("elements", [])
+        if item.get("type") == "image"
+    )
+    if total_assets > 2 * 1024 * 1024:
+        raise SpecError(
+            "Project image assets exceed 2 MiB. Use smaller or fewer images."
+        )
     return spec
 
 
@@ -205,8 +250,8 @@ class RenderJobs:
             return copy.deepcopy(self.job)
 
     def start(self, spec, output_format="video"):
-        if output_format not in ("video", "pptx"):
-            raise SpecError("Export format: choose video or pptx.")
+        if output_format not in ("video", "video-only", "pptx"):
+            raise SpecError("Export format: choose video, video-only or pptx.")
         with self.lock:
             if self.closed or (self.job and self.job["state"] == "rendering"):
                 raise RuntimeError(
@@ -269,6 +314,8 @@ class RenderJobs:
                 ]
                 if output_format == "pptx":
                     command.append("--pptx-only")
+                elif output_format == "video-only":
+                    command.append("--video-only")
                 process = subprocess.Popen(
                     command,
                     cwd=directory,
@@ -288,13 +335,14 @@ class RenderJobs:
             if returncode != 0:
                 raise RuntimeError(message)
             mp4 = directory / "video.mp4"
-            if output_format == "video":
+            if output_format in ("video", "video-only"):
                 if not mp4.is_file() or not 0 < mp4.stat().st_size <= MAX_ARTIFACT:
                     raise RuntimeError("The renderer did not produce a usable video.")
                 artifacts.append("mp4")
             pptx = directory / "video.pptx"
             if (
-                pptx.is_file()
+                output_format != "video-only"
+                and pptx.is_file()
                 and 0 < pptx.stat().st_size <= MAX_ARTIFACT
                 and zipfile.is_zipfile(pptx)
             ):
@@ -308,6 +356,8 @@ class RenderJobs:
             state = "complete"
             if output_format == "pptx":
                 message = "PowerPoint is ready. No video was rendered."
+            elif output_format == "video-only":
+                message = "Video is ready. No PowerPoint was requested."
             else:
                 message = (
                     "Video and PowerPoint are ready."
@@ -337,7 +387,10 @@ class RenderJobs:
             if (
                 self.job
                 and self.job["id"] == job_id
-                and self.job["state"] == "rendering"
+                and (
+                    self.job["state"] == "rendering"
+                    or extension not in self.job["artifacts"]
+                )
             ):
                 return None
         return (
@@ -359,8 +412,14 @@ class StudioServer(ThreadingHTTPServer):
     def __init__(self, address, jobs):
         super().__init__(address, StudioHandler)
         self.jobs = jobs
+        module = importlib.import_module("src.ai_setup" if __package__ else "ai_setup")
+        self.ai_setup = module.AISetup(WEB / "ai-assets")
         self.token = secrets.token_urlsafe(32)
         self.origin = f"http://127.0.0.1:{self.server_port}"
+
+    def server_close(self):
+        self.ai_setup.close()
+        super().server_close()
 
 
 class StudioHandler(BaseHTTPRequestHandler):
@@ -417,9 +476,27 @@ class StudioHandler(BaseHTTPRequestHandler):
                 {
                     "token": self.studio.token,
                     "job": self.studio.jobs.snapshot(),
-
                 },
             )
+        elif self.path.startswith("/fonts/"):
+            if __package__:
+                from . import composition
+            else:
+                import composition
+            names = {
+                f"/fonts/{family}-{weight}.ttf": (weight == "bold", family)
+                for family in ("sans", "serif", "mono")
+                for weight in ("regular", "bold")
+            }
+            font = names.get(self.path)
+            if font is None:
+                self.reply(404, {"error": "Font unavailable."})
+            else:
+                self.reply(
+                    200, Path(composition.font_path(*font)).read_bytes(), "font/ttf"
+                )
+        elif self.path == "/api/ai-setup":
+            self.reply(200, self.studio.ai_setup.snapshot())
         elif self.path == "/api/job":
             self.reply(200, {"job": self.studio.jobs.snapshot()})
         elif self.path.startswith("/api/artifact/"):
@@ -443,11 +520,51 @@ class StudioHandler(BaseHTTPRequestHandler):
             files = {
                 "/": ("index.html", "text/html; charset=utf-8"),
                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                "/selection-motion.js": ("selection-motion.js", "text/javascript; charset=utf-8"),
+                "/selection-motion.js": (
+                    "selection-motion.js",
+                    "text/javascript; charset=utf-8",
+                ),
                 "/ai-worker.js": ("ai-worker.js", "text/javascript; charset=utf-8"),
-                "/ai-protocol.mjs": ("ai-protocol.mjs", "text/javascript; charset=utf-8"),
+                "/ai-protocol.mjs": (
+                    "ai-protocol.mjs",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/canvas-icons.js": (
+                    "canvas-icons.js",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/design-presets.mjs": (
+                    "design-presets.mjs",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/ai-visuals.mjs": ("ai-visuals.mjs", "text/javascript; charset=utf-8"),
                 "/authoring.js": ("authoring.js", "text/javascript; charset=utf-8"),
                 "/scene-menus.js": ("scene-menus.js", "text/javascript; charset=utf-8"),
+                "/sequence-director.mjs": (
+                    "sequence-director.mjs",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/vector-library.json": (
+                    "vector-library.json",
+                    "application/json; charset=utf-8",
+                ),
+                "/DEJAVU-LICENSE": ("DEJAVU-LICENSE", "text/plain; charset=utf-8"),
+                "/composition-design.mjs": (
+                    "composition-design.mjs",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/canvas-assets.js": (
+                    "canvas-assets.js",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/project-playback.js": (
+                    "project-playback.js",
+                    "text/javascript; charset=utf-8",
+                ),
+                "/canvas-motion.js": (
+                    "canvas-motion.js",
+                    "text/javascript; charset=utf-8",
+                ),
                 "/canvas.js": ("canvas.js", "text/javascript; charset=utf-8"),
                 "/thumbnails.js": ("thumbnails.js", "text/javascript; charset=utf-8"),
                 "/interactions.js": (
@@ -457,15 +574,20 @@ class StudioHandler(BaseHTTPRequestHandler):
                 "/style.css": ("style.css", "text/css; charset=utf-8"),
             }
             assets = {
-                '/ai-assets/wllama.js': 'text/javascript',
-                '/ai-assets/wllama.wasm': 'application/wasm',
-                '/ai-assets/smollm2.gguf': 'application/octet-stream',
+                "/ai-assets/wllama.js": "text/javascript",
+                "/ai-assets/wllama.wasm": "application/wasm",
+                "/ai-assets/qwen3.5-0.8b-q4_k_m.gguf": "application/octet-stream",
             }
             if self.path in assets:
                 path = WEB / self.path.lstrip("/")
                 # WEB already denotes studio; strip only the leading slash.
-                if not path.is_file():
-                    self.reply(404, {"error": "Run python scripts/setup_browser_ai.py first."})
+                if (
+                    self.studio.ai_setup.snapshot()["status"] != "ready"
+                    or not path.is_file()
+                ):
+                    self.reply(
+                        404, {"error": "Enable local AI from the Create setup panel."}
+                    )
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", assets[self.path])
@@ -491,7 +613,12 @@ class StudioHandler(BaseHTTPRequestHandler):
         if not self.allowed(True):
             self.reply(403, {"error": "This request is not from the local Studio."})
             return
-        if self.path not in ("/api/render", "/api/validate"):
+        if self.path not in (
+            "/api/render",
+            "/api/validate",
+            "/api/ai-setup/start",
+            "/api/ai-setup/cancel",
+        ):
             self.reply(404, {"error": "Not found."})
             return
         try:
@@ -499,9 +626,23 @@ class StudioHandler(BaseHTTPRequestHandler):
                 raise SpecError("Send a JSON project.")
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= MAX_BODY:
-                raise SpecError("Project must be smaller than 128 KB.")
+                raise SpecError("Project must be smaller than 3 MiB.")
             payload = json.loads(self.rfile.read(length))
-            if self.path == "/api/validate":
+            if self.path == "/api/ai-setup/start":
+                if (
+                    not isinstance(payload, dict)
+                    or payload != {"consent": True}
+                    or type(payload.get("consent")) is not bool
+                ):
+                    raise SpecError("Confirm the local model download.")
+                self.studio.ai_setup.start(consent=True)
+                self.reply(202, self.studio.ai_setup.snapshot())
+            elif self.path == "/api/ai-setup/cancel":
+                if payload != {}:
+                    raise SpecError("Do not supply setup targets.")
+                self.studio.ai_setup.cancel()
+                self.reply(200, self.studio.ai_setup.snapshot())
+            elif self.path == "/api/validate":
                 self.reply(200, {"spec": validate_spec(payload)})
             else:
                 if not isinstance(payload, dict) or set(payload) != {"spec", "format"}:
@@ -531,6 +672,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        server.ai_setup.close()
         server.server_close()
         jobs.close()
 

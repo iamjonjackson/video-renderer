@@ -380,6 +380,60 @@ def _ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+SRT_LINE = 42  # characters per subtitle line (common SRT guideline)
+
+
+def _srt_time(t: float) -> str:
+    ms = int(round(t * 1000))
+    h, ms = divmod(ms, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def narration_cues(text: str, start: float, dur: float) -> list:
+    """Split one scene's narration into readable cues (at most 2 lines of
+    ~42 characters, breaking at sentence ends), each timed in proportion to
+    its share of the text across the narration's start and duration."""
+    words = text.split()
+    if not words or dur <= 0:
+        return []
+    chunks, cur = [], []
+    for w in words:
+        if cur and len(" ".join(cur + [w])) > 2 * SRT_LINE - 4:
+            chunks.append(cur)
+            cur = []
+        cur.append(w)
+        if w.endswith((".", "?", "!")) and len(" ".join(cur)) > SRT_LINE // 2:
+            chunks.append(cur)
+            cur = []
+    if cur:
+        chunks.append(cur)
+    total = sum(len(" ".join(c)) for c in chunks)
+    cues, t = [], start
+    for c in chunks:
+        d = dur * len(" ".join(c)) / total
+        lines, line = [], ""
+        for w in c:
+            if line and len(line) + 1 + len(w) > SRT_LINE:
+                lines.append(line)
+                line = w
+            else:
+                line = f"{line} {w}".strip()
+        lines.append(line)
+        cues.append((t, t + d, "\n".join(lines)))
+        t += d
+    return cues
+
+
+def write_srt(cues: list, path) -> None:
+    """Write cues as a standard .srt file (numbered blocks, HH:MM:SS,mmm)."""
+    blocks = [f"{i}\n{_srt_time(a)} --> {_srt_time(b)}\n{text}\n"
+              for i, (a, b, text) in enumerate(cues, 1)]
+    Path(path).write_text("\n".join(blocks), encoding="utf-8")
+    print(f"[done] {path} ({len(cues)} subtitle cues)")
+
+
 def _export_pptx(spec, scene_artifacts, output):
     try:
         import pptx_export
@@ -397,7 +451,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
 
-    video_clips, audios = [], []
+    video_clips, audios, cues = [], [], []
     scene_artifacts = []
     t_cursor = 0.0
     fps = spec["meta"]["fps"]
@@ -436,6 +490,8 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))
+            text = scene.get("narration") or " ".join(scene.get("narration_per_bullet", []))
+            cues += narration_cues(text, t_cursor, audio_dur)
 
         # Bound memory on long timelines: render each scene straight to a
         # disk segment and release it, instead of holding every composite.
@@ -466,6 +522,9 @@ def render(spec_path: str, output: str, workdir: str | None = None):
         print(f"[scene {i}] {stype}: {dur:.2f}s starting at {t_cursor:.2f}s"
               + (f" (narration {audio_dur:.2f}s)" if audio_path else ""))
         t_cursor += dur
+
+    if cues:  # #3: subtitles next to the video, same stem (sample.mp4 -> sample.srt)
+        write_srt(cues, Path(output).with_suffix(".srt"))
 
     if stream:
         # Concatenate segments with the ffmpeg concat demuxer (O(1) memory;

@@ -1,0 +1,35 @@
+1
+00:00:00,000 --> 00:00:03,200
+Welcome to the quarterly review.
+
+2
+00:00:04,200 --> 00:00:06,700
+Revenue grew twenty four percent.
+
+3
+00:00:06,700 --> 00:00:09,700
+Churn fell three points.
+
+4
+00:00:09,700 --> 00:00:11,700
+We closed two new accounts.
+
+5
+00:00:12,700 --> 00:00:16,323
+Revenue grew twenty four percent
+this quarter, churn fell by
+
+6
+00:00:16,323 --> 00:00:19,704
+three points, and we closed two
+new enterprise accounts.
+
+7
+00:00:19,704 --> 00:00:24,232
+Looking ahead, we launch the new product
+in October, enter two new markets,
+
+8
+00:00:24,232 --> 00:00:28,700
+and keep hiring in engineering across
+every region we operate in today.

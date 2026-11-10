@@ -84,6 +84,11 @@ AA (≥ 4.5:1) is met. If the target can't be reached even at maximum scrim,
 the render continues with a warning (best-effort) — it never aborts.
 `left`/`right` placements keep text on the solid theme background (contrast
 by construction) with the image in a bordered panel.
+- **Subtitles**: every render with narration also writes an `.srt` next to the MP4
+  (`output/demo.mp4` -> `output/demo.srt`). Cue times come from each narration clip's
+  real audio length and its scene start; long narration is split into cues of at most
+  two 42-character lines and ~6.5 s. Per-bullet narration gets one set of cues per clip.
+  Example: `demos/srt-subtitles-example.srt`. Tests: `python -m unittest discover -s tests`.
 - **Timing**: omit `duration` and provide `narration` for audio-driven scenes;
   `padding` (default 1.0s) adds a guaranteed tail buffer after narration.
 - **Voice**: built-in voice slugs (list via `GET /v1/audio/voices`) or a

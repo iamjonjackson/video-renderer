@@ -23,6 +23,7 @@ from moviepy import (ColorClip, CompositeVideoClip, ImageClip, TextClip,
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "themes"))
 import images as imggen
+import subtitles
 import tts
 import presets
 
@@ -64,6 +65,33 @@ def load_spec(path: str) -> dict:
     return spec
 
 
+def _narration_texts(scene: dict) -> list[str]:
+    if scene.get("narration_per_bullet"):
+        return list(scene["narration_per_bullet"])
+    return [scene["narration"]] if scene.get("narration") else []
+
+
+def _clip_path(text: str, i: int, workdir: Path, voice_cfg: dict) -> Path:
+    h = hashlib.sha1(text.encode()).hexdigest()[:10]
+    return workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'wav')}"
+
+
+def subtitle_cues(scene: dict, workdir: Path, voice_cfg: dict, t_start: float) -> list[dict]:
+    """Timed subtitle cues for a scene whose narration was just synthesized.
+
+    Per-bullet narration is laid end to end (as the combined audio is), so each
+    clip's cues start where the previous clip's audio ended."""
+    cues, t = [], t_start
+    for i, text in enumerate(_narration_texts(scene)):
+        path = _clip_path(text, i, workdir, voice_cfg)
+        if not path.exists():
+            continue
+        dur = tts.audio_duration(str(path))
+        cues.extend(subtitles.split_cues(text, t, dur))
+        t += dur
+    return cues
+
+
 def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | None, float]:
     """Synthesize narration if present; return (audio_path, duration)."""
     texts = []
@@ -76,8 +104,7 @@ def synth_narration(scene: dict, workdir: Path, voice_cfg: dict) -> tuple[str | 
         return None, 0.0
     paths = []
     for i, text in enumerate(texts):
-        h = hashlib.sha1(text.encode()).hexdigest()[:10]
-        out = workdir / f"narr_{h}_{i}.{voice_cfg.get('format', 'wav')}"
+        out = _clip_path(text, i, workdir, voice_cfg)
         if not out.exists():
             tts.synth_to_file(
                 text, str(out),
@@ -390,6 +417,15 @@ def _export_pptx(spec, scene_artifacts, output):
         print(f"[warn] pptx export failed: {e}")
 
 
+def _export_srt(cues, output):
+    """Write <output stem>.srt next to the video (only if there is narration)."""
+    if not cues:
+        return
+    srt_path = Path(output).with_suffix(".srt")
+    srt_path.write_text(subtitles.build_srt(cues), encoding="utf-8")
+    print(f"[done] {srt_path} ({len(cues)} cues)")
+
+
 def render(spec_path: str, output: str, workdir: str | None = None):
     spec = load_spec(spec_path)
     theme = spec["theme"]
@@ -398,6 +434,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     workdir.mkdir(parents=True, exist_ok=True)
 
     video_clips, audios = [], []
+    srt_cues = []
     scene_artifacts = []
     t_cursor = 0.0
     fps = spec["meta"]["fps"]
@@ -436,6 +473,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
 
         if audio_path:
             audios.append(AudioFileClip(audio_path).with_start(t_cursor))
+            srt_cues.extend(subtitle_cues(scene, workdir, voice_cfg, t_cursor))
 
         # Bound memory on long timelines: render each scene straight to a
         # disk segment and release it, instead of holding every composite.
@@ -491,6 +529,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
             Path(tmp).replace(output)
         print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps, streamed)")
         _export_pptx(spec, scene_artifacts, output)
+        _export_srt(srt_cues, output)
         return
 
     final = concatenate_videoclips(video_clips, method="compose")
@@ -501,6 +540,7 @@ def render(spec_path: str, output: str, workdir: str | None = None):
     print(f"[done] {output} ({t_cursor:.1f}s at {fps}fps)")
 
     _export_pptx(spec, scene_artifacts, output)
+    _export_srt(srt_cues, output)
 
 
 if __name__ == "__main__":

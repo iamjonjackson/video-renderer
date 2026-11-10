@@ -21,6 +21,15 @@ def _rgb(hex_color: str) -> RGBColor:
     return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
+def _narration_notes(scene: dict) -> str:
+    """Speaker-notes text for a scene: its narration, or one line per bullet
+    clip when narration_per_bullet is used. Empty string when no narration."""
+    per_bullet = [t for t in (scene.get("narration_per_bullet") or []) if t]
+    if per_bullet:
+        return "\n".join(f"{i}. {t}" for i, t in enumerate(per_bullet, 1))
+    return (scene.get("narration") or "").strip()
+
+
 def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
     """scene_artifacts: per-scene dicts with optional keys
     narration_path, chart_png, image_png, bg_image_png, scrim (0-1)."""
@@ -121,6 +130,12 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 cr.text = scene["caption"]
                 cr.font.size = Pt(16)
                 cr.font.color.rgb = fg
+
+        # narration text -> speaker notes (only created when there is text,
+        # so slides without narration have no notes slide at all)
+        notes = _narration_notes(scene)
+        if notes:
+            slide.notes_slide.notes_text_frame.text = notes
 
         # embed narration audio on the slide
         if art.get("narration_path"):

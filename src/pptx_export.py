@@ -5,6 +5,7 @@ Built from the individual artifacts (spec, narration clips, chart PNGs,
 generated scene images) — never from the rendered video.
 """
 import json
+import wave
 from pathlib import Path
 
 from pptx import Presentation
@@ -19,6 +20,29 @@ SLIDE_H = Inches(7.5)
 def _rgb(hex_color: str) -> RGBColor:
     h = hex_color.lstrip("#")
     return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def _notes_text(scene: dict, art: dict) -> str:
+    """Speaker notes for a scene's slide: its narration text, or "" if it has none.
+
+    narration_per_bullet becomes one numbered line per bullet. When the
+    narration audio is a WAV, its length is added so presenters know the pacing.
+    """
+    per_bullet = scene.get("narration_per_bullet")
+    if per_bullet:
+        lines = [f"{i + 1}. {text}" for i, text in enumerate(per_bullet)]
+    elif scene.get("narration"):
+        lines = [scene["narration"]]
+    else:
+        return ""
+    audio = art.get("narration_path")
+    if audio and str(audio).lower().endswith(".wav"):
+        try:
+            with wave.open(str(audio)) as w:
+                lines.append(f"(Narration: {w.getnframes() / w.getframerate():.1f}s)")
+        except (wave.Error, EOFError, OSError):
+            pass  # the length is a nicety; never fail the export over it
+    return "\n".join(lines)
 
 
 def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
@@ -130,6 +154,13 @@ def build_pptx(spec: dict, scene_artifacts: list, output_path: str):
                 width=Inches(0.8), height=Inches(0.8),
                 poster_frame_image=None, mime_type="audio/wav"
             )
+
+        # speaker notes: the narration text (#7). Added last, so the slide's own
+        # shapes, media and relationship ids are exactly as before; the notes
+        # page is only created when there is text.
+        notes = _notes_text(scene, art)
+        if notes:
+            slide.notes_slide.notes_text_frame.text = notes
 
     prs.save(output_path)
     return output_path

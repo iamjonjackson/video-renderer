@@ -79,9 +79,9 @@
         "type": { "const": "bullets" },
         "heading": { "type": "string" },
         "items": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "stagger": { "type": "number", "default": 0.4, "description": "Seconds between bullet reveals" },
+        "stagger": { "type": "number", "default": 0.4, "description": "Used in the default silent-scene duration; per-bullet narration uses decoded audio offsets" },
         "narration": { "type": "string" },
-        "narration_per_bullet": { "type": "array", "items": { "type": "string" }, "description": "One TTS clip per bullet, each bullet reveals as its audio starts" },
+        "narration_per_bullet": { "type": "array", "items": { "type": "string" }, "description": "One narration entry per item; each bullet fades in at its cumulative decoded audio start" },
         "duration": { "type": "number" },
         "padding": { "type": "number", "default": 1.0 },
         "transition": { "type": "string" }

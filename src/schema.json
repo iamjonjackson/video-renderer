@@ -117,6 +117,27 @@
         }
       }
     },
+    "branding": {
+      "type": "object",
+      "description": "Optional logo watermark overlaid on scenes",
+      "properties": {
+        "logo": { "type": "string", "description": "Logo image path (PNG alpha respected); relative to the spec's folder, else the current directory" },
+        "position": { "type": "string", "enum": ["top-left", "top-right", "bottom-left", "bottom-right"], "default": "bottom-right" },
+        "margin": { "type": "integer", "minimum": 1, "default": 40, "description": "Pixels between the logo and the frame edges" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.85 },
+        "max_height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.10, "description": "Logo height as a fraction of the frame height" },
+        "scenes": {
+          "oneOf": [
+            { "const": "all" },
+            { "type": "array", "items": { "enum": ["title", "bullets", "image", "chart", "outro", "composition"] } }
+          ],
+          "default": "all",
+          "description": "\"all\" or a list of scene types, e.g. [\"title\", \"outro\"]"
+        }
+      },
+      "required": ["logo"],
+      "additionalProperties": false
+    },
     "timeline": {
       "type": "array",
       "items": {

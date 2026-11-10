@@ -44,7 +44,23 @@ def validate_spec(value, studio=True):
         ):
             raise SpecError(f"{where}: use a number between {low} and {high}.")
 
-    object_fields(value, ("version", "meta", "theme", "timeline", "voice"), "Project")
+    object_fields(value, ("version", "meta", "theme", "timeline", "voice") + (() if studio else ("branding",)), "Project")
+    if "branding" in value:
+        branding = value["branding"]
+        object_fields(branding, ("logo", "position", "margin", "opacity", "max_height", "scenes"), "Branding")
+        text(branding.get("logo"), "Branding logo", 4096)
+        if not branding["logo"].strip():
+            raise SpecError("Branding logo must be a non-empty path.")
+        if branding.get("position", "bottom-right") not in ("top-left", "top-right", "bottom-left", "bottom-right"):
+            raise SpecError("Choose a supported branding corner.")
+        margin = branding.get("margin", 40)
+        if type(margin) is not int or margin < 1:
+            raise SpecError("Branding margin must be a positive integer.")
+        number(branding.get("opacity", .85), "Branding opacity", 0, 1)
+        number(branding.get("max_height", .10), "Branding height", .000001, 1)
+        selected = branding.get("scenes", "all")
+        if selected != "all" and (not isinstance(selected, list) or any(kind not in ("title", "bullets", "image", "chart", "outro", "composition") for kind in selected)):
+            raise SpecError("Branding scenes must be all or supported scene types.")
     version = value.get("version", 1)
     if type(version) is not int or version != 1:
         raise SpecError("Project: only document version 1 is supported.")

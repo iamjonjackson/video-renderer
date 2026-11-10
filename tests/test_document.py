@@ -37,6 +37,32 @@ def canvas():
 
 
 class DocumentTests(unittest.TestCase):
+    def test_branding_logo_respects_all_frame_edges(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as directory:
+            logo = Path(directory) / "logo.png"
+            Image.new("RGBA", (120, 120), "white").save(logo)
+            for corner in ("top-left", "top-right", "bottom-left", "bottom-right"):
+                branding = render.load_branding({"branding": {"logo": str(logo), "max_height": 1, "margin": 40, "position": corner}}, str(Path(directory) / "spec.json"), 320, 180)
+                clip = branding["clip"]
+                x, y = clip.pos(0)
+                self.assertGreaterEqual(x, 40)
+                self.assertGreaterEqual(y, 40)
+                self.assertLessEqual(x + clip.w, 280)
+                self.assertLessEqual(y + clip.h, 140)
+                clip.close()
+            with self.assertRaisesRegex(ValueError, "no usable"):
+                render.load_branding({"branding": {"logo": str(logo), "margin": 100}}, str(logo), 320, 180)
+
+    def test_fork_branding_stays_cli_only(self):
+        spec = {"branding": {"logo": "logo.png", "scenes": ["title"]}, "timeline": [{"type": "title", "text": "Hello"}]}
+        self.assertEqual(validate_spec(spec, studio=False)["branding"], spec["branding"])
+        with self.assertRaises(SpecError):
+            validate_spec(spec)
+        for invalid in ({"logo": "logo.png", "opacity": True}, {"logo": "logo.png", "position": "middle"}):
+            with self.assertRaises(SpecError):
+                validate_spec({**spec, "branding": invalid}, studio=False)
+
     def test_studio_reexports_shared_contract(self):
         self.assertIs(studio.validate_spec, validate_spec)
         self.assertIs(studio.SpecError, SpecError)

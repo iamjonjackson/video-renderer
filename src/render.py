@@ -37,11 +37,10 @@ from moviepy import (
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "themes"))
-import presets
-
 import composition
 import images as imggen
 import narration
+import presets
 import tts
 
 ANIM_IN = 0.6
@@ -131,6 +130,12 @@ def synth_narration(
             )
             tmp.replace(out)  # never leave a half-written clip in the cache
         paths.append(str(out))
+    if per_bullet:
+        # #6: when each bullet's clip starts in the joined track, from the
+        # decoded durations (same measure as the timeline), as a running sum.
+        durs = [tts.audio_duration(p) for p in paths]
+        scene["_bullet_starts"] = [sum(durs[:i]) for i in range(len(durs))]
+        print("[bullets] reveal at " + ", ".join(f"{t:.2f}s" for t in scene["_bullet_starts"]))
     if len(paths) == 1:
         return paths[0], tts.audio_duration(paths[0])
     combined = (
@@ -368,15 +373,18 @@ def build_bullets(scene, theme, workdir=None):
     top, bottom = 0.30, 0.85
     step = (bottom - top) / max(n, 1)
     stagger = scene.get("stagger", 0.4)
+    starts = scene.get("_bullet_starts")  # narration_per_bullet clip starts (#6)
+    if not starts or len(starts) != n:
+        starts = None
     for i, item in enumerate(scene["items"]):
         bullet = _left_text_clip("• " + item, theme, b_size, max_w_px=int(W * max_w))
         y = int(H * (top + i * step))
         bullet = bullet.with_position((x, y))
-        if stagger > 0:
+        if starts or stagger > 0:
             if bullet.mask is None:
                 bullet = bullet.with_mask()
             bullet = bullet.with_mask(bullet.mask.with_effects([vfx.FadeIn(BULLET_FADE)]))
-            bullet = bullet.with_start(i * stagger)
+            bullet = bullet.with_start(starts[i] if starts else i * stagger)
         clips.append(bullet)
 
     return CompositeVideoClip(clips, size=(W, H))
@@ -494,6 +502,66 @@ def apply_anim(clip, anim: str, duration: float):
             lambda t: 1.0 + min(t / (duration * 0.8), 1) * 0.05
         ).with_effects([vfx.FadeIn(ANIM_IN)])
     return clip
+
+
+BRANDING_DEFAULTS = {"position": "bottom-right", "margin": 40, "opacity": 0.85,
+                     "max_height": 0.10, "scenes": "all"}
+CORNERS = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+
+def load_branding(spec: dict, spec_path: str, width: int = W, height: int = H) -> dict | None:
+    """Prepare the optional logo watermark once; None when absent or unusable."""
+    cfg = spec.get("branding")
+    if not cfg:
+        return None
+    cfg = {**BRANDING_DEFAULTS, **cfg}
+    if not cfg.get("logo"):
+        print("[warn] 'branding' block missing 'logo'; rendering without branding")
+        return None
+    import numpy as np
+    from PIL import Image
+    # Relative logo paths resolve against the spec's folder first, then the
+    # current directory (like image `src`).
+    logo_path = Path(cfg["logo"])
+    if not logo_path.is_absolute() and (Path(spec_path).parent / logo_path).exists():
+        logo_path = Path(spec_path).parent / logo_path
+    try:
+        img = Image.open(logo_path).convert("RGBA")
+    except OSError as e:
+        print(f"[warn] branding logo unreadable ({e}); rendering without branding")
+        return None
+    pos = cfg["position"]
+    if pos not in CORNERS:
+        print(f"[warn] unknown branding position {pos!r}; using bottom-right")
+        pos = "bottom-right"
+    # Scale to max_height (fraction of H), never wider than the frame allows,
+    # and keep at least 1px between the logo and the frame border.
+    margin = max(int(cfg["margin"]), 1)
+    if width <= 2 * margin or height <= 2 * margin:
+        raise ValueError("Branding margin leaves no usable frame area.")
+    scale = min(height * cfg["max_height"] / img.height,
+                (width - 2 * margin) / img.width,
+                (height - 2 * margin) / img.height)
+    img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))),
+                     Image.LANCZOS)
+    x = margin if pos.endswith("left") else width - margin - img.width
+    y = margin if pos.startswith("top") else height - margin - img.height
+    # ImageClip turns the PNG alpha into a mask; with_opacity scales that mask.
+    logo = ImageClip(np.array(img)).with_opacity(cfg["opacity"]).with_position((x, y))
+    return {"clip": logo, "scenes": cfg["scenes"]}
+
+
+def apply_branding(clip, scene: dict, branding: dict, dur: float, size=(W, H)):
+    """Overlay the logo on a scene after its animation, so the logo holds
+    steady (no fade, zoom or slide) while the scene underneath animates."""
+    scenes = branding["scenes"]
+    if scenes != "all" and scene["type"] not in scenes:
+        return clip
+    # "center" matches concatenate_videoclips(method="compose"), which
+    # re-centres every scene, so the scene under the logo looks unchanged.
+    return CompositeVideoClip([clip.with_position("center"),
+                               branding["clip"].with_duration(dur)],
+                              size=size).with_duration(dur)
 
 
 def _ffmpeg_exe() -> str:
@@ -687,6 +755,7 @@ def _render_impl(spec_path, output, workdir, render_video, export_pptx,
         raise ValueError("Authored scene transitions support at most 12 scenes; streaming would omit them.")
     workdir = Path(workdir or Path(spec_path).parent / ".render_cache")
     workdir.mkdir(parents=True, exist_ok=True)
+    branding = load_branding(spec, spec_path, width, height)
 
     if not render_video:
         render_pptx_only(spec, output, workdir, media=media)
@@ -707,6 +776,9 @@ def _render_impl(spec_path, output, workdir, render_video, export_pptx,
     for i, scene in enumerate(spec["timeline"]):
         scene_resources_start = len(resources)
         stype = scene["type"]
+        audio_path, audio_dur, dur = scene_media(scene, i, workdir, voice_cfg, media)
+        scene_durations.append(dur)
+        # Resolve narration first so legacy bullet reveals use clip start times.
         if stype == "composition":
             clip = composition.build_clip(scene, width, height)
         elif stype in ("image", "chart", "title", "bullets"):
@@ -727,8 +799,6 @@ def _render_impl(spec_path, output, workdir, render_video, export_pptx,
                 size=(width, height),
             )
 
-        audio_path, audio_dur, dur = scene_media(scene, i, workdir, voice_cfg, media)
-        scene_durations.append(dur)
         clip = clip.with_duration(dur)
         if scene.get("motion_version") != 1:
             clip = apply_anim(clip, scene.get("anim", "fade"), dur)
@@ -740,6 +810,8 @@ def _render_impl(spec_path, output, workdir, render_video, export_pptx,
             clip = CompositeVideoClip(
                 [clip.with_position("center")], size=(width, height)
             ).with_duration(dur)
+        if branding:
+            clip = apply_branding(clip, scene, branding, dur, (width, height))
 
         resources.append(clip)
         if audio_path:

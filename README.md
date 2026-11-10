@@ -66,6 +66,54 @@ using the `MISTRAL_API_KEY` repo secret and uploads the MP4 as an artifact.
   embedded on their slides, chart PNGs, generated images). Open in
   PowerPoint, tweak, and export to video from there for a near-identical
   result.
+- **Editable charts**: chart slides now use native PowerPoint charts by
+  default for `bar`, `line`, and `pie`. The labels and values are embedded in
+  an Excel workbook, so PowerPoint's **Chart Design → Edit Data in Excel**
+  can change the data. Chart and plot backgrounds, text, axes, and series
+  use the spec palette; pie slices use the existing accent/foreground/grey
+  palette. The `bar` type remains vertical columns, matching the video.
+  Titles and the optional `y_label` are retained. Native chart layout may
+  differ slightly from matplotlib's rendering.
+
+  To keep the previous static image on a particular slide, add
+  `"pptx_chart": "png"` to that chart scene. `"native"` is the default.
+  This setting affects only the PPTX: video scenes still use the same
+  matplotlib PNGs. An unsupported native chart type falls back to the PNG
+  with a warning; a missing fallback image reports an export error.
+
+  ```json
+  {
+    "type": "chart",
+    "chart_type": "bar",
+    "pptx_chart": "native",
+    "heading": "Monthly revenue",
+    "labels": ["Jul", "Aug", "Sep"],
+    "values": [410, 455, 512],
+    "y_label": "Revenue ($k)"
+  }
+  ```
+
+  Try all three native types and a PNG slide without using API credits:
+
+  ```bash
+  python3 src/render.py samples/native-charts-spec.json -o output/editable-charts-demo.mp4
+  ```
+
+  Open `output/editable-charts-demo.pptx`, select the first chart, and use
+  **Chart Design → Edit Data in Excel** (or right-click → **Edit Data**).
+  Change a value and confirm the chart updates, then save and reopen the
+  deck. Check the line and pie slides too; the fourth slide intentionally
+  remains a picture. Capture the chart with its data sheet open as PR evidence.
+
+  Run the automated checks without API calls:
+
+  ```bash
+  python3 -m unittest discover -s tests -p 'test_native_charts.py' -v
+  ```
+
+  These checks inspect native chart objects, embedded workbook values,
+  dark/light theme colours, saved data edits, PNG selection, fallback
+  warnings, narration retention, and identical video chart frames.
 - **AI-generated images** (optional, any scene): add an `image` block —
 
 ```json

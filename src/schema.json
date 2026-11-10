@@ -107,6 +107,7 @@
       "properties": {
         "type": { "const": "chart" },
         "chart_type": { "enum": ["bar", "line", "pie"], "default": "bar" },
+        "pptx_chart": { "enum": ["native", "png"], "default": "native", "description": "PowerPoint chart format; video rendering always uses matplotlib" },
         "heading": { "type": "string" },
         "labels": { "type": "array", "items": { "type": "string" } },
         "values": { "type": "array", "items": { "type": "number" } },
